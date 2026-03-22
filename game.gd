@@ -67,13 +67,12 @@ var player_fire_cooldown: float = 0.0
 
 var planned_player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
 var planned_player_speed: float = PLAYER_SPEED_DEFAULT
-var planned_fire: bool = false
 var planned_player_target_dir: Vector2 = Vector2.UP # kept for reference but no longer used for homing
 var planned_turn_angle: float = 0.0
 var current_turn_rate: float = 0.0 # radians/sec for active slice
 var turn_limit_this_turn: float = MAX_TURN_RADIANS
 
-var enemies: Array = [] # each: {pos: Vector2, vel: Vector2, alive: bool}
+var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_cooldown}
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
 
 var end_state: StringName = ""
@@ -87,6 +86,7 @@ func _ready() -> void:
     _generate_stars()
     _reset_game()
     restart_button.pressed.connect(_on_restart_pressed)
+    fire_button.pressed.connect(_try_fire_player)
 
     var style := StyleBoxFlat.new()
     style.bg_color = Color(0, 0, 0, 0)
@@ -133,7 +133,6 @@ func _reset_game() -> void:
     planned_player_vel = player_vel
     planned_player_speed = player_speed
     planned_player_target_dir = player_vel.normalized()
-    planned_fire = false
     planned_turn_angle = 0.0
     current_turn_rate = 0.0
     turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
@@ -175,9 +174,15 @@ func _reset_game() -> void:
 
     if is_node_ready():
         $Renderer.queue_redraw()
+    if is_node_ready():
+        _update_fire_button_ui()
 
 
 func _process(delta: float) -> void:
+    # Tick player cooldown regardless of phase (player can fire during planning too)
+    if player_fire_cooldown > 0.0:
+        player_fire_cooldown = maxf(0.0, player_fire_cooldown - delta)
+
     if phase == GamePhase.SIMULATING:
         _step_simulation(delta)
     elif phase == GamePhase.ENDED:
@@ -185,6 +190,7 @@ func _process(delta: float) -> void:
 
     camera.position = player_pos
     $Renderer.queue_redraw()
+    _update_fire_button_ui()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -201,9 +207,6 @@ func _unhandled_input(event: InputEvent) -> void:
 
     if event is InputEventMouseMotion:
         _update_planned_vector(get_global_mouse_position())
-    elif event is InputEventMouseButton and event.pressed:
-        if event.button_index == MOUSE_BUTTON_LEFT:
-            planned_fire = not planned_fire
 
 
 func _start_simulation() -> void:
@@ -216,17 +219,6 @@ func _start_simulation() -> void:
     current_turn_rate = 0.0
     if SIM_DURATION > 0.0:
         current_turn_rate = planned_turn_angle / SIM_DURATION
-
-    # Optionally spawn a missile straight ahead
-    if planned_fire and player_alive:
-        var dir := player_vel.normalized()
-        var spawn_pos := player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
-        missiles.append({
-            "pos": spawn_pos,
-            "vel": dir * MISSILE_SPEED,
-            "from_player": true,
-        })
-        planned_fire = false
 
     # Enemies fire one missile each turn toward the player's current position (if alive)
     if player_alive:
@@ -251,9 +243,7 @@ func _step_simulation(delta: float) -> void:
 
     if delta > 0.0:
         _integrate_motion(delta)
-        # Tick weapon cooldowns
-        if player_fire_cooldown > 0.0:
-            player_fire_cooldown = maxf(0.0, player_fire_cooldown - delta)
+        # Tick enemy weapon cooldowns (player cooldown is ticked in _process)
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - delta)
@@ -383,6 +373,52 @@ func _show_end_ui() -> void:
 
 func _on_restart_pressed() -> void:
     _reset_game()
+
+
+func _try_fire_player() -> void:
+    if not player_alive:
+        return
+    if player_missiles_remaining <= 0:
+        return
+    if player_fire_cooldown > 0.0:
+        return
+
+    var dir := player_vel.normalized()
+    var spawn_pos := player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
+    missiles.append({
+        "pos": spawn_pos,
+        "vel": dir * MISSILE_SPEED,
+        "from_player": true,
+    })
+    player_missiles_remaining -= 1
+    player_fire_cooldown = PLAYER_FIRE_COOLDOWN
+
+
+func _update_fire_button_ui() -> void:
+    var ready := player_fire_cooldown <= 0.0 and player_missiles_remaining > 0 and phase != GamePhase.ENDED
+
+    fire_button.disabled = not ready
+
+    if player_missiles_remaining <= 0:
+        fire_button.text = "NO AMMO"
+    elif player_fire_cooldown > 0.0:
+        fire_button.text = "RELOADING..."
+    else:
+        fire_button.text = "FIRE"
+
+    # Cooldown fill sweeps left-to-right as cooldown expires (0 = just fired, full = ready)
+    var fill_ratio := 1.0 - clampf(player_fire_cooldown / PLAYER_FIRE_COOLDOWN, 0.0, 1.0)
+    cooldown_fill.size.x = fire_button.size.x * fill_ratio
+
+    # Fade border to 25% opacity when out of ammo
+    var border_alpha := 0.25 if player_missiles_remaining <= 0 else 1.0
+    var s := fire_button.get_theme_stylebox("normal") as StyleBoxFlat
+    if s:
+        s.border_color = Color(0.3, 0.91, 1.0, border_alpha)
+
+    # Ammo dots
+    ammo_display.missiles_remaining = player_missiles_remaining
+    ammo_display.queue_redraw()
 
 
 func _update_planned_vector(mouse_world: Vector2) -> void:
