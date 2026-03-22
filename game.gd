@@ -268,7 +268,7 @@ func _step_enemy_firing(_delta: float) -> void:
             continue
 
         # Only fire when roughly facing the player (within 45 degrees)
-        var angle_to_player := enemy.vel.normalized().angle_to(to_player.normalized())
+        var angle_to_player: float = enemy.vel.normalized().angle_to(to_player.normalized())
         if abs(angle_to_player) > ENEMY_FIRE_ANGLE_THRESHOLD:
             continue
 
