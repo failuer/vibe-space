@@ -1,9 +1,13 @@
 [gd_scene load_steps=3 format=3 uid="uid://c8b65jlgemdbf"]
 
 [ext_resource type="Script" uid="uid://b05ahhjv38rm1" path="res://game.gd" id="1_wtcfe"]
+[ext_resource type="Script" path="res://game_renderer.gd" id="2_renderer"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_wtcfe")
+
+[node name="Renderer" type="Node2D" parent="."]
+script = ExtResource("2_renderer")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(0, 0)

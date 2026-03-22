@@ -59,7 +59,6 @@ var planned_fire: bool = false
 var planned_player_target_dir: Vector2 = Vector2.UP # kept for reference but no longer used for homing
 var planned_turn_angle: float = 0.0
 var current_turn_rate: float = 0.0 # radians/sec for active slice
-var planned_end_pos: Vector2 = Vector2.ZERO
 var turn_limit_this_turn: float = MAX_TURN_RADIANS
 
 var enemies: Array = [] # each: {pos: Vector2, vel: Vector2, alive: bool}
@@ -102,7 +101,6 @@ func _reset_game() -> void:
     planned_fire = false
     planned_turn_angle = 0.0
     current_turn_rate = 0.0
-    planned_end_pos = player_pos
     turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
 
     # Simple enemy setup: a few ships moving straight
@@ -143,10 +141,8 @@ func _process(delta: float) -> void:
     elif phase == GamePhase.ENDED:
         _step_end_timer(delta)
 
-    # Camera follows player
     camera.position = player_pos
-
-    queue_redraw()
+    $Renderer.queue_redraw()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -399,174 +395,6 @@ func _play_area_rect() -> Rect2:
 
 func _is_inside_play_area(p: Vector2) -> bool:
     return _play_area_rect().has_point(p)
-
-
-func _draw() -> void:
-    _draw_starfield()
-    _draw_outside_dark_mask()
-    _draw_play_area_inner_border()
-
-    # Draw player
-    if player_alive:
-        _draw_circle_outline(player_pos, PLAYER_RADIUS, PLAYER_COLOR)
-
-    # Draw enemies
-    for enemy in enemies:
-        if enemy.alive:
-            _draw_circle_outline(enemy.pos, ENEMY_RADIUS, ENEMY_COLOR)
-
-    # Draw missiles
-    for missile in missiles:
-        var col: Color = MISSILE_COLOR
-        if not missile.from_player:
-            col = ENEMY_MISSILE_COLOR
-        _draw_circle_outline(missile.pos, MISSILE_RADIUS, col)
-
-    # Draw planned movement vector and affordances in planning phase
-    if phase == GamePhase.PLANNING and player_alive:
-        _draw_turn_wedge()
-        _draw_planned_path()
-        _draw_planned_ghost()
-
-
-func _draw_circle_outline(center: Vector2, radius: float, color: Color) -> void:
-    var points := 32
-    var angle_step := TAU / float(points)
-    for i in points:
-        var a := angle_step * i
-        var b := angle_step * (i + 1)
-        var p1 := center + Vector2(cos(a), sin(a)) * radius
-        var p2 := center + Vector2(cos(b), sin(b)) * radius
-        draw_line(p1, p2, color, 1.5)
-
-
-func _draw_play_area_inner_border() -> void:
-    var r := _play_area_rect()
-    var t := PLAY_BORDER_THICKNESS
-
-    # Top strip
-    draw_rect(Rect2(r.position, Vector2(r.size.x, t)), BORDER_COLOR, true)
-    # Bottom strip
-    draw_rect(Rect2(Vector2(r.position.x, r.position.y + r.size.y - t), Vector2(r.size.x, t)), BORDER_COLOR, true)
-    # Left strip
-    draw_rect(Rect2(r.position, Vector2(t, r.size.y)), BORDER_COLOR, true)
-    # Right strip
-    draw_rect(Rect2(Vector2(r.position.x + r.size.x - t, r.position.y), Vector2(t, r.size.y)), BORDER_COLOR, true)
-
-
-func _draw_outside_dark_mask() -> void:
-    # Draw a full-screen dark quad, then punch a transparent hole for the play area.
-    var r := _play_area_rect()
-    var dark_color := Color(0.0, 0.0, 0.0, 0.9)
-
-    # Big rect covering around the origin (larger than play area)
-    var big_size := r.size * 4.0
-    var big_origin := -big_size * 0.5
-
-    # Four rectangles around the play area to approximate a mask.
-    # Top
-    draw_rect(Rect2(big_origin, Vector2(big_size.x, r.position.y - big_origin.y)), dark_color, true)
-    # Bottom
-    var bottom_y := r.position.y + r.size.y
-    var bottom_height := big_origin.y + big_size.y - bottom_y
-    draw_rect(Rect2(Vector2(big_origin.x, bottom_y), Vector2(big_size.x, bottom_height)), dark_color, true)
-    # Left
-    draw_rect(Rect2(Vector2(big_origin.x, r.position.y), Vector2(r.position.x - big_origin.x, r.size.y)), dark_color, true)
-    # Right
-    var right_x := r.position.x + r.size.x
-    var right_width := big_origin.x + big_size.x - right_x
-    draw_rect(Rect2(Vector2(right_x, r.position.y), Vector2(right_width, r.size.y)), dark_color, true)
-
-
-func _draw_starfield() -> void:
-    # Draw parallax stars in world-space so they scroll slower than gameplay objects.
-    # We tile a small "screen-space" patch around the camera to avoid huge world coords.
-    for layer_idx in STAR_LAYER_COUNT:
-        var stars: Array = _stars_by_layer[layer_idx]
-        var parallax: float = float(STAR_PARALLAX_BY_LAYER[layer_idx])
-        var radius: float = float(STAR_RADIUS_BY_LAYER[layer_idx])
-
-        var shift := player_pos * parallax
-        var shift_mod := Vector2(
-            fposmod(shift.x, STAR_TILE_SIZE.x),
-            fposmod(shift.y, STAR_TILE_SIZE.y)
-        )
-
-        for oy in [-1, 0, 1]:
-            for ox in [-1, 0, 1]:
-                var tile_offset := Vector2(float(ox) * STAR_TILE_SIZE.x, float(oy) * STAR_TILE_SIZE.y)
-                for s: Vector2 in stars:
-                    var screen_pos: Vector2 = s + tile_offset - shift_mod
-                    var world_pos: Vector2 = player_pos + screen_pos
-                    draw_circle(world_pos, radius, STAR_COLOR)
-
-
-func _draw_planned_path() -> void:
-    # Preview the same constant-rate curving motion the ship will execute when unpausing.
-    var steps := 18
-    var dt := SIM_DURATION / float(steps)
-
-    var preview_pos := player_pos
-    var preview_vel := player_vel
-    var preview_speed := planned_player_speed
-    var preview_turn_rate: float = 0.0
-    if SIM_DURATION > 0.0:
-        preview_turn_rate = planned_turn_angle / SIM_DURATION
-
-    var prev := preview_pos
-    for i in steps:
-        var step_angle := preview_turn_rate * dt
-        if step_angle != 0.0:
-            preview_vel = preview_vel.rotated(step_angle)
-        preview_vel = preview_vel.normalized() * preview_speed
-        preview_pos += preview_vel * dt
-        draw_line(prev, preview_pos, PLANNED_VECTOR_COLOR, 2.0)
-        prev = preview_pos
-
-    planned_end_pos = preview_pos
-
-
-func _draw_planned_ghost() -> void:
-    # Draw a ghost of the player collider at the exact arc endpoint.
-    var col := PLAYER_COLOR
-    col.a = 0.35
-    var end_pos := _arc_endpoint(player_pos, player_vel.normalized(), planned_player_speed, planned_turn_angle)
-    _draw_circle_outline(end_pos, PLAYER_RADIUS, col)
-
-
-func _draw_turn_wedge() -> void:
-    # Visualize the true reachable endpoint region using the same circular-arc formula
-    # the simulation executes. Outer boundary = max speed, inner = min speed, sides = ±turn_limit.
-    var forward_dir := player_vel.normalized()
-    if forward_dir == Vector2.ZERO:
-        forward_dir = Vector2.UP
-
-    var segments: int = 40
-    var col := PLANNED_VECTOR_COLOR
-    col.a = 0.25
-
-    # Outer arc: max speed, sweep from -turn_limit to +turn_limit (left to right)
-    var outer_pts: Array[Vector2] = []
-    for i in range(segments + 1):
-        var t := float(i) / float(segments)
-        var ang := -turn_limit_this_turn + 2.0 * turn_limit_this_turn * t
-        outer_pts.append(_arc_endpoint(player_pos, forward_dir, PLAYER_SPEED_MAX, ang))
-
-    # Inner arc: min speed, sweep from +turn_limit to -turn_limit (right to left, closes shape)
-    var inner_pts: Array[Vector2] = []
-    for i in range(segments + 1):
-        var t := float(i) / float(segments)
-        var ang := turn_limit_this_turn - 2.0 * turn_limit_this_turn * t
-        inner_pts.append(_arc_endpoint(player_pos, forward_dir, PLAYER_SPEED_MIN, ang))
-
-    for i in range(outer_pts.size() - 1):
-        draw_line(outer_pts[i], outer_pts[i + 1], col, 1.0)
-    for i in range(inner_pts.size() - 1):
-        draw_line(inner_pts[i], inner_pts[i + 1], col, 1.0)
-
-    # Side edges at the two turn extremes
-    draw_line(outer_pts[0], inner_pts[inner_pts.size() - 1], col, 1.0)
-    draw_line(outer_pts[outer_pts.size() - 1], inner_pts[0], col, 1.0)
 
 
 func _compute_turn_limit_for_speed(speed: float) -> float:
