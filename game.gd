@@ -263,7 +263,7 @@ func _step_enemy_firing(_delta: float) -> void:
         if enemy.missiles_remaining <= 0:
             continue
 
-        var to_player := player_pos - enemy.pos
+        var to_player: Vector2 = player_pos - enemy.pos
         if to_player == Vector2.ZERO:
             continue
 
