@@ -15,13 +15,13 @@ func _draw() -> void:
 
 	for enemy in game.enemies:
 		if enemy.alive:
-			_draw_ship_triangle(enemy.pos, enemy.vel, game.ENEMY_RADIUS, game.ENEMY_COLOR)
+			_draw_ship_triangle(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, game.ENEMY_COLOR)
 
 	for missile in game.missiles:
 		var col: Color = game.MISSILE_COLOR
 		if not missile.from_player:
 			col = game.ENEMY_MISSILE_COLOR
-		_draw_missile_triangle(missile.pos, missile.vel, game.MISSILE_RADIUS, col)
+		_draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, col)
 
 	if game.phase == Game.GamePhase.PLANNING and game.player_alive:
 		_draw_turn_wedge()
