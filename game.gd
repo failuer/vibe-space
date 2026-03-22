@@ -273,7 +273,7 @@ func _step_enemy_firing(_delta: float) -> void:
             continue
 
         var edir := to_player.normalized()
-        var e_spawn := enemy.pos + edir * (ENEMY_RADIUS + MISSILE_RADIUS + 2.0)
+        var e_spawn: Vector2 = enemy.pos + edir * (ENEMY_RADIUS + MISSILE_RADIUS + 2.0)
         missiles.append({
             "pos": e_spawn,
             "vel": edir * MISSILE_SPEED,
