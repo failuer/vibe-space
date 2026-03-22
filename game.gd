@@ -199,14 +199,17 @@ func _unhandled_input(event: InputEvent) -> void:
 
     if event is InputEventKey and event.pressed and not event.echo:
         if event.keycode == KEY_SPACE:
-            if phase == GamePhase.PLANNING and player_alive:
-                _start_simulation()
+            _try_fire_player()
 
     if phase != GamePhase.PLANNING:
         return
 
     if event is InputEventMouseMotion:
         _update_planned_vector(get_global_mouse_position())
+
+    if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+        if player_alive:
+            _start_simulation()
 
 
 func _start_simulation() -> void:
