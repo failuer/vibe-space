@@ -1,0 +1,38 @@
+[gd_scene load_steps=3 format=3 uid="uid://c8b65jlgemdbf"]
+
+[ext_resource type="Script" uid="uid://b05ahhjv38rm1" path="res://new_script.gd" id="1_wtcfe"]
+
+[node name="Game" type="Node2D"]
+script = ExtResource("1_wtcfe")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(0, 0)
+current = true
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="MessageLabel" type="Label" parent="CanvasLayer"]
+anchors_preset = 15
+anchor_left = 0.5
+anchor_top = 0.3
+anchor_right = 0.5
+anchor_bottom = 0.3
+offset_left = -150.0
+offset_right = 150.0
+offset_top = -20.0
+offset_bottom = 20.0
+horizontal_alignment = 1
+vertical_alignment = 1
+text = ""
+
+[node name="RestartButton" type="Button" parent="CanvasLayer"]
+anchors_preset = 15
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -60.0
+offset_right = 60.0
+offset_top = -20.0
+offset_bottom = 20.0
+text = "Restart"
