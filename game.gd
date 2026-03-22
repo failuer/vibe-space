@@ -179,10 +179,6 @@ func _reset_game() -> void:
 
 
 func _process(delta: float) -> void:
-    # Tick player cooldown regardless of phase (player can fire during planning too)
-    if player_fire_cooldown > 0.0:
-        player_fire_cooldown = maxf(0.0, player_fire_cooldown - delta)
-
     if phase == GamePhase.SIMULATING:
         _step_simulation(delta)
     elif phase == GamePhase.ENDED:
@@ -233,7 +229,9 @@ func _step_simulation(delta: float) -> void:
 
     if delta > 0.0:
         _integrate_motion(delta)
-        # Tick enemy weapon cooldowns (player cooldown is ticked in _process)
+        # Tick weapon cooldowns (tied to game time — paused during planning, scales with play speed)
+        if player_fire_cooldown > 0.0:
+            player_fire_cooldown = maxf(0.0, player_fire_cooldown - delta)
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - delta)
