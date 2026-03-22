@@ -5,7 +5,7 @@ enum GamePhase { PLANNING, SIMULATING, ENDED }
 
 const SIM_DURATION := 2.0 # seconds, tweakable
 const SIM_WINDUP_REAL := 0.25   # real seconds to ramp up to full speed at sim start
-const SIM_WINDDOWN_GAME := 0.5  # game seconds over which to ramp down at sim end
+const SIM_WINDDOWN_GAME := 0.25  # game seconds over which to ramp down at sim end
 const PLAYER_RADIUS := 16.0
 const ENEMY_RADIUS := 16.0
 const MISSILE_RADIUS := 8.0
