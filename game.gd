@@ -132,7 +132,8 @@ func _reset_game() -> void:
     message_label.visible = false
     restart_button.visible = false
 
-    queue_redraw()
+    if is_node_ready():
+        $Renderer.queue_redraw()
 
 
 func _process(delta: float) -> void:
