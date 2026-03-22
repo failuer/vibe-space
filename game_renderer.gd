@@ -11,17 +11,17 @@ func _draw() -> void:
 	_draw_play_area_inner_border()
 
 	if game.player_alive:
-		_draw_circle_outline(game.player_pos, game.PLAYER_RADIUS, game.PLAYER_COLOR)
+		_draw_ship_triangle(game.player_pos, game.player_vel, game.PLAYER_RADIUS, game.PLAYER_COLOR)
 
 	for enemy in game.enemies:
 		if enemy.alive:
-			_draw_circle_outline(enemy.pos, game.ENEMY_RADIUS, game.ENEMY_COLOR)
+			_draw_ship_triangle(enemy.pos, enemy.vel, game.ENEMY_RADIUS, game.ENEMY_COLOR)
 
 	for missile in game.missiles:
 		var col: Color = game.MISSILE_COLOR
 		if not missile.from_player:
 			col = game.ENEMY_MISSILE_COLOR
-		_draw_circle_outline(missile.pos, game.MISSILE_RADIUS, col)
+		_draw_missile_triangle(missile.pos, missile.vel, game.MISSILE_RADIUS, col)
 
 	if game.phase == Game.GamePhase.PLANNING and game.player_alive:
 		_draw_turn_wedge()
@@ -29,15 +29,22 @@ func _draw() -> void:
 		_draw_planned_ghost()
 
 
-func _draw_circle_outline(center: Vector2, radius: float, color: Color) -> void:
-	var points := 32
-	var angle_step := TAU / float(points)
-	for i in points:
-		var a := angle_step * i
-		var b := angle_step * (i + 1)
-		var p1 := center + Vector2(cos(a), sin(a)) * radius
-		var p2 := center + Vector2(cos(b), sin(b)) * radius
-		draw_line(p1, p2, color, 1.5)
+func _draw_ship_triangle(center: Vector2, vel: Vector2, radius: float, color: Color) -> void:
+	var fwd := vel.normalized() if vel != Vector2.ZERO else Vector2.UP
+	var right := Vector2(-fwd.y, fwd.x)
+	var tip := center + fwd * radius
+	var back_left := center - fwd * radius * 0.5 + right * radius * 0.65
+	var back_right := center - fwd * radius * 0.5 - right * radius * 0.65
+	draw_polygon(PackedVector2Array([tip, back_left, back_right]), PackedColorArray([color, color, color]))
+
+
+func _draw_missile_triangle(center: Vector2, vel: Vector2, radius: float, color: Color) -> void:
+	var fwd := vel.normalized() if vel != Vector2.ZERO else Vector2.UP
+	var right := Vector2(-fwd.y, fwd.x)
+	var tip := center + fwd * radius * 1.4
+	var back_left := center - fwd * radius * 0.6 + right * radius * 0.4
+	var back_right := center - fwd * radius * 0.6 - right * radius * 0.4
+	draw_polygon(PackedVector2Array([tip, back_left, back_right]), PackedColorArray([color, color, color]))
 
 
 func _draw_play_area_inner_border() -> void:
@@ -113,7 +120,8 @@ func _draw_planned_ghost() -> void:
 	var col := game.PLAYER_COLOR
 	col.a = 0.35
 	var end_pos := game._arc_endpoint(game.player_pos, game.player_vel.normalized(), game.planned_player_speed, game.planned_turn_angle)
-	_draw_circle_outline(end_pos, game.PLAYER_RADIUS, col)
+	var end_facing := game.player_vel.normalized().rotated(game.planned_turn_angle)
+	_draw_ship_triangle(end_pos, end_facing, game.PLAYER_RADIUS, col)
 
 
 func _draw_turn_wedge() -> void:
