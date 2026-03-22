@@ -4,6 +4,8 @@ class_name Game
 enum GamePhase { PLANNING, SIMULATING, ENDED }
 
 const SIM_DURATION := 2.0 # seconds, tweakable
+const SIM_WINDUP_REAL := 0.25   # real seconds to ramp up to full speed at sim start
+const SIM_WINDDOWN_GAME := 0.5  # game seconds over which to ramp down at sim end
 const PLAYER_RADIUS := 16.0
 const ENEMY_RADIUS := 16.0
 const MISSILE_RADIUS := 8.0
@@ -57,6 +59,7 @@ const STAR_RADIUS_BY_LAYER := [1.5, 1.2, 1.0]
 
 var phase: GamePhase = GamePhase.PLANNING
 var sim_time_left: float = 0.0
+var sim_real_elapsed: float = 0.0
 
 var player_pos: Vector2 = Vector2.ZERO
 var player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
@@ -211,6 +214,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _start_simulation() -> void:
     phase = GamePhase.SIMULATING
     sim_time_left = SIM_DURATION
+    sim_real_elapsed = 0.0
 
     # Commit planned movement intent for this turn (movement will curve at a constant rate over the whole slice)
     planned_player_target_dir = planned_player_vel.normalized()
@@ -222,20 +226,26 @@ func _start_simulation() -> void:
 
 
 func _step_simulation(delta: float) -> void:
-    sim_time_left -= delta
+    sim_real_elapsed += delta
+    var windup := smoothstep(0.0, SIM_WINDUP_REAL, sim_real_elapsed)
+    var winddown := smoothstep(0.0, SIM_WINDDOWN_GAME, sim_time_left)
+    var time_scale := maxf(0.1, minf(windup, winddown))
+    var game_delta := delta * time_scale
+
+    sim_time_left -= game_delta
     if sim_time_left <= 0.0:
-        delta += sim_time_left # simulate only remaining time if overshoot
+        game_delta += sim_time_left # trim overshoot
         sim_time_left = 0.0
 
-    if delta > 0.0:
-        _integrate_motion(delta)
-        # Tick weapon cooldowns (tied to game time — paused during planning, scales with play speed)
+    if game_delta > 0.0:
+        _integrate_motion(game_delta)
+        # Tick weapon cooldowns (tied to game time — scales with time_scale automatically)
         if player_fire_cooldown > 0.0:
-            player_fire_cooldown = maxf(0.0, player_fire_cooldown - delta)
+            player_fire_cooldown = maxf(0.0, player_fire_cooldown - game_delta)
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
-                enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - delta)
-        _step_enemy_firing(delta)
+                enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
+        _step_enemy_firing(game_delta)
         _handle_collisions()
         _check_leave_play_area()
         _cull_offscreen_objects()
