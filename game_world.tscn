@@ -61,6 +61,7 @@ text = "FIRE"
 [node name="CooldownFill" type="ColorRect" parent="CanvasLayer/FireButtonContainer/FireButton"]
 mouse_filter = 2
 color = Color(0.302, 0.91, 1, 0.13)
+anchors_preset = -1
 anchor_bottom = 1.0
 offset_right = 0.0
 
