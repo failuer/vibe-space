@@ -51,6 +51,9 @@ const STAR_RADIUS_BY_LAYER := [1.5, 1.2, 1.0]
 @onready var camera: Camera2D = $Camera2D
 @onready var message_label: Label = $CanvasLayer/MessageLabel
 @onready var restart_button: Button = $CanvasLayer/RestartButton
+@onready var fire_button: Button = $CanvasLayer/FireButtonContainer/FireButton
+@onready var cooldown_fill: ColorRect = $CanvasLayer/FireButtonContainer/FireButton/CooldownFill
+@onready var ammo_display: Control = $CanvasLayer/FireButtonContainer/AmmoDisplay
 
 var phase: GamePhase = GamePhase.PLANNING
 var sim_time_left: float = 0.0
@@ -84,6 +87,27 @@ func _ready() -> void:
     _generate_stars()
     _reset_game()
     restart_button.pressed.connect(_on_restart_pressed)
+
+    var style := StyleBoxFlat.new()
+    style.bg_color = Color(0, 0, 0, 0)
+    style.border_width_left = 2
+    style.border_width_right = 2
+    style.border_width_top = 2
+    style.border_width_bottom = 2
+    style.border_color = Color(0.3, 0.91, 1.0, 1.0)
+    style.corner_radius_top_left = 22
+    style.corner_radius_top_right = 22
+    style.corner_radius_bottom_left = 22
+    style.corner_radius_bottom_right = 22
+    fire_button.add_theme_stylebox_override("normal", style)
+    fire_button.add_theme_stylebox_override("hover", style)
+    fire_button.add_theme_stylebox_override("pressed", style)
+    fire_button.add_theme_stylebox_override("disabled", style)
+    fire_button.add_theme_color_override("font_color", Color(0.3, 0.91, 1.0))
+    fire_button.add_theme_color_override("font_disabled_color", Color(0.3, 0.91, 1.0, 0.3))
+
+    ammo_display.missiles_max = PLAYER_MAX_MISSILES
+    ammo_display.missiles_remaining = player_missiles_remaining
 
 func _generate_stars() -> void:
     _stars_by_layer.clear()
