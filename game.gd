@@ -28,6 +28,13 @@ const BORDER_COLOR := Color(1.0, 0.0, 0.0, 0.1)
 const PLAY_AREA_HALF_EXTENTS := Vector2(975.0, 675.0) # 50% larger
 const PLAY_BORDER_THICKNESS := 80.0
 
+const PLAYER_MAX_MISSILES := 10
+const PLAYER_FIRE_COOLDOWN := 4.0
+
+const ENEMY_MAX_MISSILES := 6
+const ENEMY_FIRE_COOLDOWN := 3.5
+const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
+
 const PLAYER_TURN_RATE := MAX_TURN_RADIANS * 1.5 / SIM_DURATION # baseline sharper turns
 
 const ARROW_MIN_DIST := PLAYER_SPEED_MIN * SIM_DURATION
@@ -52,6 +59,8 @@ var player_pos: Vector2 = Vector2.ZERO
 var player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
 var player_speed: float = PLAYER_SPEED_DEFAULT
 var player_alive: bool = true
+var player_missiles_remaining: int = PLAYER_MAX_MISSILES
+var player_fire_cooldown: float = 0.0
 
 var planned_player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
 var planned_player_speed: float = PLAYER_SPEED_DEFAULT
@@ -95,6 +104,8 @@ func _reset_game() -> void:
     player_vel = Vector2.UP * PLAYER_SPEED_DEFAULT
     player_speed = PLAYER_SPEED_DEFAULT
     player_alive = true
+    player_missiles_remaining = PLAYER_MAX_MISSILES
+    player_fire_cooldown = 0.0
     planned_player_vel = player_vel
     planned_player_speed = player_speed
     planned_player_target_dir = player_vel.normalized()
@@ -109,16 +120,22 @@ func _reset_game() -> void:
         "pos": Vector2(300.0, 0.0),
         "vel": Vector2.LEFT * ENEMY_SPEED,
         "alive": true,
+        "missiles_remaining": ENEMY_MAX_MISSILES,
+        "fire_cooldown": 0.0,
     })
     enemies.append({
         "pos": Vector2(-250.0, -150.0),
         "vel": Vector2.RIGHT * ENEMY_SPEED,
         "alive": true,
+        "missiles_remaining": ENEMY_MAX_MISSILES,
+        "fire_cooldown": 0.0,
     })
     enemies.append({
         "pos": Vector2(0.0, 250.0),
         "vel": Vector2.UP * ENEMY_SPEED,
         "alive": true,
+        "missiles_remaining": ENEMY_MAX_MISSILES,
+        "fire_cooldown": 0.0,
     })
 
     missiles.clear()
@@ -210,6 +227,12 @@ func _step_simulation(delta: float) -> void:
 
     if delta > 0.0:
         _integrate_motion(delta)
+        # Tick weapon cooldowns
+        if player_fire_cooldown > 0.0:
+            player_fire_cooldown = maxf(0.0, player_fire_cooldown - delta)
+        for enemy in enemies:
+            if enemy.alive and enemy.fire_cooldown > 0.0:
+                enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - delta)
         _handle_collisions()
         _check_leave_play_area()
         _cull_offscreen_objects()
