@@ -220,19 +220,6 @@ func _start_simulation() -> void:
     if SIM_DURATION > 0.0:
         current_turn_rate = planned_turn_angle / SIM_DURATION
 
-    # Enemies fire one missile each turn toward the player's current position (if alive)
-    if player_alive:
-        for enemy in enemies:
-            if enemy.alive:
-                var to_player: Vector2 = (player_pos - enemy.pos)
-                if to_player != Vector2.ZERO:
-                    var edir: Vector2 = to_player.normalized()
-                    var e_spawn: Vector2 = enemy.pos + edir * (ENEMY_RADIUS + MISSILE_RADIUS + 2.0)
-                    missiles.append({
-                        "pos": e_spawn,
-                        "vel": edir * MISSILE_SPEED,
-                        "from_player": false,
-                    })
 
 
 func _step_simulation(delta: float) -> void:
@@ -247,6 +234,7 @@ func _step_simulation(delta: float) -> void:
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - delta)
+        _step_enemy_firing(delta)
         _handle_collisions()
         _check_leave_play_area()
         _cull_offscreen_objects()
@@ -261,6 +249,38 @@ func _step_simulation(delta: float) -> void:
             planned_player_vel = player_vel
             planned_player_speed = player_speed
             turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
+
+
+func _step_enemy_firing(_delta: float) -> void:
+    if not player_alive:
+        return
+
+    for enemy in enemies:
+        if not enemy.alive:
+            continue
+        if enemy.fire_cooldown > 0.0:
+            continue
+        if enemy.missiles_remaining <= 0:
+            continue
+
+        var to_player := player_pos - enemy.pos
+        if to_player == Vector2.ZERO:
+            continue
+
+        # Only fire when roughly facing the player (within 45 degrees)
+        var angle_to_player := enemy.vel.normalized().angle_to(to_player.normalized())
+        if abs(angle_to_player) > ENEMY_FIRE_ANGLE_THRESHOLD:
+            continue
+
+        var edir := to_player.normalized()
+        var e_spawn := enemy.pos + edir * (ENEMY_RADIUS + MISSILE_RADIUS + 2.0)
+        missiles.append({
+            "pos": e_spawn,
+            "vel": edir * MISSILE_SPEED,
+            "from_player": false,
+        })
+        enemy.missiles_remaining -= 1
+        enemy.fire_cooldown = ENEMY_FIRE_COOLDOWN
 
 
 func _integrate_motion(delta: float) -> void:
