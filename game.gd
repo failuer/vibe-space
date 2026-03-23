@@ -190,7 +190,7 @@ func _reset_game() -> void:
         { "pos": Vector2(0.0, 250.0),     "vel": Vector2.UP    * ENEMY_SPEED },
     ]
     for i in enemy_spawns.size():
-        var archetype := ARCHETYPE_ROSTER[i % ARCHETYPE_ROSTER.size()]
+        var archetype: String = ARCHETYPE_ROSTER[i % ARCHETYPE_ROSTER.size()]
         enemies.append({
             "pos":                enemy_spawns[i].pos,
             "vel":                enemy_spawns[i].vel,
