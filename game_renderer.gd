@@ -73,70 +73,48 @@ func _draw_play_area_inner_border() -> void:
 
 func _draw_stripe_band(rect: Rect2, stripe_color: Color, gap_color: Color, stripe_width: float) -> void:
 	# Draw alternating diagonal (45°) stripes clipped to rect.
-	# Stripes run at 45°: a stripe parallelogram has two edges parallel to (1,1) direction.
-	# Each stripe covers a band of width stripe_width measured perpendicular to the (1,1) direction.
-	# We parameterise stripes by their offset along the (-1,1) axis (perpendicular to stripe direction).
+	# Stripes run at 45° along (1,1); perpendicular axis is (-1,1).
+	# NOTE: parallelogram U-axis is in world space; _play_area_rect() is always centered at
+	# world origin (Rect2(-half_extents, half_extents*2)), so this is always valid.
 
-	# The rect as a clip polygon (4 corners, clockwise).
+	const S2 := 1.41421356237  # sqrt(2), hoisted out of inner loop
+
+	# Clip polygon — use Rect2.end for the bottom-right corner.
 	var clip_poly := PackedVector2Array([
 		rect.position,
-		Vector2(rect.position.x + rect.size.x, rect.position.y),
-		Vector2(rect.position.x + rect.size.x, rect.position.y + rect.size.y),
-		Vector2(rect.position.y + rect.size.y, rect.position.y + rect.size.y)  # placeholder – corrected below
+		Vector2(rect.end.x, rect.position.y),
+		rect.end,
+		Vector2(rect.position.x, rect.end.y)
 	])
-	clip_poly[3] = Vector2(rect.position.x, rect.position.y + rect.size.y)
 
-	# Stripe direction: (1, 1) normalised → actual draw extends far past the rect.
-	# Perpendicular axis for offset: (-1, 1) / sqrt2 — but we work in 45° projected coords.
-	# Project rect corners onto perpendicular axis p = (-x + y) to find range of stripes needed.
-	var corners := [
-		rect.position,
-		Vector2(rect.position.x + rect.size.x, rect.position.y),
-		Vector2(rect.position.x + rect.size.x, rect.position.y + rect.size.y),
-		Vector2(rect.position.x, rect.position.y + rect.size.y)
-	]
-
+	# Project rect corners onto perpendicular axis p = (-x + y) to find stripe range.
 	var proj_min := INF
 	var proj_max := -INF
-	for c: Vector2 in corners:
-		var p := -c.x + c.y  # projection along (-1, 1) (un-normalised; width in this space = stripe_width * sqrt2)
-		if p < proj_min:
-			proj_min = p
-		if p > proj_max:
-			proj_max = p
+	for c: Vector2 in [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]:
+		var p := -c.x + c.y
+		if p < proj_min: proj_min = p
+		if p > proj_max: proj_max = p
 
-	# Each stripe occupies stripe_width * sqrt2 in projected space (alternating with equal gap).
-	var band := stripe_width * sqrt(2.0)
-	# Snap start to a multiple of 2*band so pattern tiles consistently in world space.
+	# Each stripe occupies stripe_width * sqrt2 in un-normalised projected space (~10 iterations for typical play area).
+	var band := stripe_width * S2
 	var start := floor(proj_min / (2.0 * band)) * (2.0 * band)
-
-	var half_ext := (rect.size.x + rect.size.y) * 2.0  # generous extent along stripe direction
+	var half_ext := (rect.size.x + rect.size.y) * 2.0
 
 	var offset := start
 	while offset < proj_max:
-		# Build two parallelograms per iteration: one colored, one black (gap).
 		for pass_idx in 2:
 			var color: Color = stripe_color if pass_idx == 0 else gap_color
 			var lo := offset + float(pass_idx) * band
 			var hi := lo + band
-			# The stripe parallelogram in screen space:
-			# Along perpendicular (-1,1)/sqrt2: from lo/sqrt2 to hi/sqrt2
-			# Along direction  (1,1)/sqrt2:     from -half_ext/sqrt2 to +half_ext/sqrt2
-			# A point in this 2D rotated frame: pos = u*(1,1) + v*(-1,1)  (un-normalised, scaled by 1/sqrt2)
-			# We pick four corners: (u,v) = (±half, lo) and (±half, hi) in projected units / sqrt2
-			var h := half_ext
-			var s2 := sqrt(2.0)
-			# lo and hi are in (un-normalised) projected coords; divide by s2 to get actual screen offset
-			var v_lo := lo / s2
-			var v_hi := hi / s2
-			var u_lo := -h / s2
-			var u_hi :=  h / s2
-			var p0 := Vector2(u_lo - v_lo, u_lo + v_lo)  # u*(1,1) + v*(-1,1) with u=u_lo, v=v_lo
-			var p1 := Vector2(u_hi - v_lo, u_hi + v_lo)  # u=u_hi, v=v_lo
-			var p2 := Vector2(u_hi - v_hi, u_hi + v_hi)  # u=u_hi, v=v_hi
-			var p3 := Vector2(u_lo - v_hi, u_lo + v_hi)  # u=u_lo, v=v_hi
-			var stripe_poly := PackedVector2Array([p0, p1, p2, p3])
-			var clipped_arrays := Geometry2D.clip_polygons(stripe_poly, clip_poly)
+			var v_lo := lo / S2
+			var v_hi := hi / S2
+			var u_lo := -half_ext / S2
+			var u_hi :=  half_ext / S2
+			var p0 := Vector2(u_lo - v_lo, u_lo + v_lo)
+			var p1 := Vector2(u_hi - v_lo, u_hi + v_lo)
+			var p2 := Vector2(u_hi - v_hi, u_hi + v_hi)
+			var p3 := Vector2(u_lo - v_hi, u_lo + v_hi)
+			var clipped_arrays := Geometry2D.clip_polygons(PackedVector2Array([p0, p1, p2, p3]), clip_poly)
 			for clipped in clipped_arrays:
 				if (clipped as PackedVector2Array).size() >= 3:
 					var n := (clipped as PackedVector2Array).size()
