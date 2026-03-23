@@ -24,7 +24,7 @@ const ENEMY_COLOR := Color(1.0, 0.4, 0.4)
 const MISSILE_COLOR := Color(1.0, 1.0, 0.4)
 const ENEMY_MISSILE_COLOR := Color(1.0, 0.6, 0.2)
 const PLANNED_VECTOR_COLOR := Color(0.5, 1.0, 0.5)
-const STAR_COLOR := Color(1.0, 1.0, 1.0, 0.9)
+const STAR_COLOR := Color(0.85, 0.90, 1.0, 0.45)
 const BORDER_COLOR := Color(1.0, 0.0, 0.0, 0.1)
 
 const PLAY_AREA_HALF_EXTENTS := Vector2(975.0, 675.0) # 50% larger
