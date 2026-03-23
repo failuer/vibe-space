@@ -1,6 +1,10 @@
 extends Node2D
 class_name Game
 
+const AggressorAI = preload("res://aggressor_ai.gd")
+const OrbiterAI   = preload("res://orbiter_ai.gd")
+const FlankerAI   = preload("res://flanker_ai.gd")
+
 enum GamePhase { PLANNING, SIMULATING, ENDED }
 
 const SIM_DURATION := 2.0 # seconds, tweakable
@@ -261,6 +265,14 @@ func _start_simulation() -> void:
 
 
 
+func _get_ai(archetype: String) -> GDScript:
+    match archetype:
+        "aggressor": return AggressorAI
+        "orbiter":   return OrbiterAI
+        "flanker":   return FlankerAI
+    return AggressorAI  # fallback for unknown archetypes
+
+
 func _step_simulation(delta: float) -> void:
     sim_real_elapsed += delta
     var windup := smoothstep(0.0, SIM_WINDUP_REAL, sim_real_elapsed)
@@ -274,13 +286,46 @@ func _step_simulation(delta: float) -> void:
         sim_time_left = 0.0
 
     if game_delta > 0.0:
-        _integrate_motion(game_delta)
-        # Tick weapon cooldowns (tied to game time — scales with time_scale automatically)
+        # 1. Tick weapon cooldowns (before AI so should_fire sees updated cooldown)
         if player_fire_cooldown > 0.0:
             player_fire_cooldown = maxf(0.0, player_fire_cooldown - game_delta)
         for enemy in enemies:
-            if enemy.alive and enemy.fire_cooldown > 0.0:
-                enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
+            if enemy.alive and (enemy.fire_cooldown as float) > 0.0:
+                enemy.fire_cooldown = maxf(0.0, (enemy.fire_cooldown as float) - game_delta)
+
+        # 2. AI dispatcher — steer, fire, evade (only while player is alive)
+        if player_alive:
+            for enemy in enemies:
+                if not enemy.alive:
+                    continue
+                var ai := _get_ai(enemy.archetype)
+
+                # Steering sets velocity for this frame
+                enemy.vel = ai.steer(enemy, self, game_delta)
+
+                # Firing — archetype decides intent; _try_fire_enemy checks cooldown/ammo
+                if ai.should_fire(enemy, self):
+                    _try_fire_enemy(enemy)
+
+                # Evasion — only the single nearest player missile within range
+                var nearest_missile = null
+                var nearest_dist    := EVASION_DETECT_RADIUS
+                for missile in missiles:
+                    if missile.from_player:
+                        var d := (missile.pos as Vector2).distance_to(enemy.pos as Vector2)
+                        if d < nearest_dist:
+                            nearest_dist    = d
+                            nearest_missile = missile
+                if nearest_missile != null:
+                    enemy.vel += ai.evade_missile(
+                        enemy,
+                        nearest_missile.pos as Vector2,
+                        nearest_missile.vel as Vector2,
+                        game_delta
+                    )
+
+        # 3. Physics integration (uses velocities set by AI dispatcher)
+        _integrate_motion(game_delta)
         _handle_collisions()
         _step_explosions(game_delta)
         _check_leave_play_area()
