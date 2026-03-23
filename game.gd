@@ -485,9 +485,9 @@ func _try_fire_player() -> void:
 
 
 func _update_fire_button_ui() -> void:
-    var ready := player_fire_cooldown <= 0.0 and player_missiles_remaining > 0 and phase != GamePhase.ENDED
+    var fire_ready := player_fire_cooldown <= 0.0 and player_missiles_remaining > 0 and phase != GamePhase.ENDED
 
-    fire_button.disabled = not ready
+    fire_button.disabled = not fire_ready
 
     if player_missiles_remaining <= 0:
         fire_button.text = "NO AMMO"
@@ -616,11 +616,11 @@ func _apply_blast_impulse(blast_pos: Vector2, blast_radius: float) -> void:
 
 func _step_explosions(delta: float) -> void:
     var living_explosions: Array = []
-    for exp in explosions:
-        exp.lifetime -= delta
-        exp.pos = (exp.pos as Vector2) + (exp.vel as Vector2) * delta
-        if exp.lifetime > 0.0:
-            living_explosions.append(exp)
+    for explosion in explosions:
+        explosion.lifetime -= delta
+        explosion.pos = (explosion.pos as Vector2) + (explosion.vel as Vector2) * delta
+        if explosion.lifetime > 0.0:
+            living_explosions.append(explosion)
     explosions = living_explosions
 
     # Swap out debris before iterating so _spawn_explosion() calls from chain kills

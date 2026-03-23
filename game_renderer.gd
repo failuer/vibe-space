@@ -125,7 +125,7 @@ func _draw_stripe_band(rect: Rect2, stripe_color: Color, gap_color: Color, strip
 
 	# Each stripe occupies stripe_width * sqrt2 in un-normalised projected space (~10 iterations for typical play area).
 	var band := stripe_width * S2
-	var start := floor(proj_min / (2.0 * band)) * (2.0 * band)
+	var start: float = floor(proj_min / (2.0 * band)) * (2.0 * band)
 	var half_ext := (rect.size.x + rect.size.y) * 2.0
 
 	var offset := start
@@ -255,14 +255,14 @@ func _draw_turn_wedge() -> void:
 
 
 func _draw_explosions() -> void:
-	for exp in game.explosions:
-		var t := 1.0 - (exp.lifetime as float) / (exp.max_lifetime as float)
-		var current_r := (exp.radius as float) * t
+	for explosion in game.explosions:
+		var t := 1.0 - (explosion.lifetime as float) / (explosion.max_lifetime as float)
+		var current_r := (explosion.radius as float) * t
 		var alpha := (1.0 - t) * 0.8
-		var is_ship: bool = exp.is_ship as bool
+		var is_ship: bool = explosion.is_ship as bool
 		var ring_color := Color(1.0, 0.5, 0.1, alpha) if is_ship else Color(1.0, 0.9, 0.3, alpha)
 		if current_r > 1.0:
-			draw_arc(exp.pos as Vector2, current_r, 0.0, TAU, 32, ring_color, 2.5)
+			draw_arc(explosion.pos as Vector2, current_r, 0.0, TAU, 32, ring_color, 2.5)
 
 
 func _draw_debris() -> void:
