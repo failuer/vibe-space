@@ -290,8 +290,8 @@ func _step_simulation(delta: float) -> void:
         if player_fire_cooldown > 0.0:
             player_fire_cooldown = maxf(0.0, player_fire_cooldown - game_delta)
         for enemy in enemies:
-            if enemy.alive and (enemy.fire_cooldown as float) > 0.0:
-                enemy.fire_cooldown = maxf(0.0, (enemy.fire_cooldown as float) - game_delta)
+            if enemy.alive and enemy.fire_cooldown > 0.0:
+                enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
 
         # 2. AI dispatcher — steer, fire, evade (only while player is alive)
         if player_alive:
@@ -478,7 +478,7 @@ func _on_restart_pressed() -> void:
 
 
 func _try_fire_enemy(enemy: Dictionary) -> void:
-    if (enemy.fire_cooldown as float) > 0.0:
+    if enemy.fire_cooldown > 0.0:
         return
     if (enemy.missiles_remaining as int) <= 0:
         return
