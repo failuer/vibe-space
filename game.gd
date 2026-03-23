@@ -281,7 +281,6 @@ func _step_simulation(delta: float) -> void:
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
-        _step_enemy_firing(game_delta)
         _handle_collisions()
         _step_explosions(game_delta)
         _check_leave_play_area()
@@ -299,39 +298,6 @@ func _step_simulation(delta: float) -> void:
             turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
             turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
             turn_speed_max = player_speed + PLAYER_SPEED_DELTA
-
-
-func _step_enemy_firing(_delta: float) -> void:
-    if not player_alive:
-        return
-
-    for enemy in enemies:
-        if not enemy.alive:
-            continue
-        if enemy.fire_cooldown > 0.0:
-            continue
-        if enemy.missiles_remaining <= 0:
-            continue
-
-        var to_player: Vector2 = player_pos - enemy.pos
-        if to_player == Vector2.ZERO:
-            continue
-
-        # Only fire when roughly facing the player (within 45 degrees)
-        var angle_to_player: float = enemy.vel.normalized().angle_to(to_player.normalized())
-        if abs(angle_to_player) > ENEMY_FIRE_ANGLE_THRESHOLD:
-            continue
-
-        var edir := to_player.normalized()
-        var e_spawn: Vector2 = enemy.pos + edir * (ENEMY_RADIUS + MISSILE_RADIUS + 2.0)
-        missiles.append({
-            "pos": e_spawn,
-            "vel": edir * MISSILE_SPEED,
-            "from_player": false,
-            "power": MISSILE_POWER,
-        })
-        enemy.missiles_remaining -= 1
-        enemy.fire_cooldown = ENEMY_FIRE_COOLDOWN
 
 
 func _integrate_motion(delta: float) -> void:
@@ -464,6 +430,25 @@ func _show_end_ui() -> void:
 
 func _on_restart_pressed() -> void:
     _reset_game()
+
+
+func _try_fire_enemy(enemy: Dictionary) -> void:
+    if (enemy.fire_cooldown as float) > 0.0:
+        return
+    if (enemy.missiles_remaining as int) <= 0:
+        return
+    var aim_dir := (player_pos - (enemy.pos as Vector2)).normalized()
+    if aim_dir == Vector2.ZERO:
+        return  # enemy is exactly on player — skip
+    var spawn_pos := (enemy.pos as Vector2) + aim_dir * (ENEMY_RADIUS + MISSILE_RADIUS + 2.0)
+    missiles.append({
+        "pos":         spawn_pos,
+        "vel":         aim_dir * MISSILE_SPEED,
+        "from_player": false,
+        "power":       MISSILE_POWER,
+    })
+    enemy.missiles_remaining = (enemy.missiles_remaining as int) - 1
+    enemy.fire_cooldown      = ENEMY_FIRE_COOLDOWN
 
 
 func _try_fire_player() -> void:
