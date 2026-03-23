@@ -35,6 +35,21 @@ const PLAYER_MAX_HP := 5
 const ENEMY_MAX_HP := 3
 const MISSILE_POWER := 2  # base power for all missiles
 
+const EXPLOSION_RING_DURATION := 0.6
+const EXPLOSION_MAX_RADIUS_SHIP := 80.0
+const EXPLOSION_MAX_RADIUS_MISSILE := 35.0
+const EXPLOSION_BLAST_RADIUS_SHIP := 120.0
+const EXPLOSION_BLAST_RADIUS_MISSILE := 60.0
+const EXPLOSION_BLAST_FORCE := 300.0
+const DEBRIS_SPEED_MIN := 80.0
+const DEBRIS_SPEED_MAX := 220.0
+const DEBRIS_LIFETIME := 3.0
+const DEBRIS_SIZE_SHIP := 7.0
+const DEBRIS_SIZE_MISSILE := 4.0
+const DEBRIS_COUNT_SHIP := 10
+const DEBRIS_COUNT_MISSILE := 4
+const DEBRIS_HP_DAMAGE := 1
+
 const PLAYER_MAX_MISSILES := 10
 const PLAYER_FIRE_COOLDOWN := 4.0
 
@@ -86,6 +101,8 @@ var turn_limit_this_turn: float = MAX_TURN_RADIANS
 
 var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_cooldown}
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
+var explosions: Array = []  # each: {pos, vel, lifetime, max_lifetime, radius, is_ship}
+var debris: Array = []  # each: {pos, vel, angle, angular_vel, lifetime, max_lifetime, size, hp_dealt: bool}
 
 var end_state: StringName = ""
 var end_timer: float = 0.0
@@ -180,6 +197,8 @@ func _reset_game() -> void:
     })
 
     missiles.clear()
+    explosions.clear()
+    debris.clear()
 
     phase = GamePhase.PLANNING
     sim_time_left = 0.0
@@ -262,6 +281,7 @@ func _step_simulation(delta: float) -> void:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
         _step_enemy_firing(game_delta)
         _handle_collisions()
+        _step_explosions(game_delta)
         _check_leave_play_area()
         _cull_offscreen_objects()
 
@@ -339,6 +359,9 @@ func _handle_collisions() -> void:
                     enemy.hp = (enemy.hp as int) - power
                     if (enemy.hp as int) <= 0:
                         enemy.alive = false
+                        _spawn_explosion(enemy.pos as Vector2, enemy.vel as Vector2, true)
+                    var hit_pos: Vector2 = missile.pos as Vector2
+                    _spawn_explosion(hit_pos, missile.vel as Vector2, false)
                     missile.pos.x = SCENE_RADIUS * 2.0
                     break  # one missile hits one target
         else:
@@ -346,6 +369,9 @@ func _handle_collisions() -> void:
                 player_hp -= power
                 if player_hp <= 0:
                     player_alive = false
+                    _spawn_explosion(player_pos, player_vel, true)
+                var hit_pos: Vector2 = missile.pos as Vector2
+                _spawn_explosion(hit_pos, missile.vel as Vector2, false)
                 missile.pos.x = SCENE_RADIUS * 2.0
 
     # Ramming: damage based on relative speed, minimum 1
@@ -360,8 +386,10 @@ func _handle_collisions() -> void:
                 enemy.hp = (enemy.hp as int) - ram_damage
                 if player_hp <= 0:
                     player_alive = false
+                    _spawn_explosion(player_pos, player_vel, true)
                 if (enemy.hp as int) <= 0:
                     enemy.alive = false
+                    _spawn_explosion(enemy.pos as Vector2, enemy.vel as Vector2, true)
 
 
 func _cull_offscreen_objects() -> void:
@@ -528,6 +556,98 @@ func _arc_endpoint(start: Vector2, facing: Vector2, speed: float, turn_angle: fl
     var x := vT * sin(turn_angle) / turn_angle
     var y := vT * (1.0 - cos(turn_angle)) / turn_angle
     return start + fwd * x + right * y
+
+
+func _spawn_explosion(pos: Vector2, vel: Vector2, is_ship: bool) -> void:
+    var max_r := EXPLOSION_MAX_RADIUS_SHIP if is_ship else EXPLOSION_MAX_RADIUS_MISSILE
+    explosions.append({
+        "pos": pos,
+        "vel": vel,
+        "lifetime": EXPLOSION_RING_DURATION,
+        "max_lifetime": EXPLOSION_RING_DURATION,
+        "radius": max_r,
+        "is_ship": is_ship,
+    })
+
+    var count := DEBRIS_COUNT_SHIP if is_ship else DEBRIS_COUNT_MISSILE
+    var size := DEBRIS_SIZE_SHIP if is_ship else DEBRIS_SIZE_MISSILE
+    for i in count:
+        var angle := randf() * TAU
+        var speed := randf_range(DEBRIS_SPEED_MIN, DEBRIS_SPEED_MAX)
+        debris.append({
+            "pos": pos,
+            "vel": vel + Vector2(cos(angle), sin(angle)) * speed,
+            "angle": randf() * TAU,
+            "angular_vel": randf_range(-3.0, 3.0),
+            "lifetime": DEBRIS_LIFETIME * randf_range(0.6, 1.0),
+            "max_lifetime": DEBRIS_LIFETIME,
+            "size": size,
+            "hp_dealt": false,
+        })
+
+    var blast_r := EXPLOSION_BLAST_RADIUS_SHIP if is_ship else EXPLOSION_BLAST_RADIUS_MISSILE
+    _apply_blast_impulse(pos, blast_r)
+
+
+func _apply_blast_impulse(blast_pos: Vector2, blast_radius: float) -> void:
+    for enemy in enemies:
+        if not enemy.alive:
+            continue
+        var diff: Vector2 = (enemy.pos as Vector2) - blast_pos
+        var dist := diff.length()
+        if dist < blast_radius and dist > 0.1:
+            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            enemy.vel = (enemy.vel as Vector2) + diff.normalized() * force
+
+    for missile in missiles:
+        var diff: Vector2 = (missile.pos as Vector2) - blast_pos
+        var dist := diff.length()
+        if dist < blast_radius and dist > 0.1:
+            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            missile.vel = (missile.vel as Vector2) + diff.normalized() * force
+
+    if player_alive:
+        var diff := player_pos - blast_pos
+        var dist := diff.length()
+        if dist < blast_radius and dist > 0.1:
+            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            player_vel += diff.normalized() * force
+
+
+func _step_explosions(delta: float) -> void:
+    var living_explosions: Array = []
+    for exp in explosions:
+        exp.lifetime -= delta
+        exp.pos = (exp.pos as Vector2) + (exp.vel as Vector2) * delta
+        if exp.lifetime > 0.0:
+            living_explosions.append(exp)
+    explosions = living_explosions
+
+    var living_debris: Array = []
+    for d in debris:
+        d.lifetime -= delta
+        d.pos = (d.pos as Vector2) + (d.vel as Vector2) * delta
+        d.angle = (d.angle as float) + (d.angular_vel as float) * delta
+
+        if not (d.hp_dealt as bool):
+            if player_alive and _circles_overlap(d.pos as Vector2, d.size as float, player_pos, PLAYER_RADIUS):
+                player_hp -= DEBRIS_HP_DAMAGE
+                if player_hp <= 0:
+                    player_alive = false
+                d.hp_dealt = true
+            else:
+                for enemy in enemies:
+                    if enemy.alive and _circles_overlap(d.pos as Vector2, d.size as float, enemy.pos as Vector2, ENEMY_RADIUS):
+                        enemy.hp = (enemy.hp as int) - DEBRIS_HP_DAMAGE
+                        if (enemy.hp as int) <= 0:
+                            enemy.alive = false
+                            _spawn_explosion(enemy.pos as Vector2, enemy.vel as Vector2, true)
+                        d.hp_dealt = true
+                        break
+
+        if (d.lifetime as float) > 0.0:
+            living_debris.append(d)
+    debris = living_debris
 
 
 func _circles_overlap(a_pos: Vector2, a_radius: float, b_pos: Vector2, b_radius: float) -> bool:

@@ -25,6 +25,9 @@ func _draw() -> void:
 			col = game.ENEMY_MISSILE_COLOR
 		_draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, col)
 
+	_draw_explosions()
+	_draw_debris()
+
 	if game.phase == Game.GamePhase.PLANNING and game.player_alive:
 		_draw_turn_wedge()
 		_draw_planned_path()
@@ -249,3 +252,28 @@ func _draw_turn_wedge() -> void:
 
 	draw_line(outer_pts[0], inner_pts[inner_pts.size() - 1], col, 1.0)
 	draw_line(outer_pts[outer_pts.size() - 1], inner_pts[0], col, 1.0)
+
+
+func _draw_explosions() -> void:
+	for exp in game.explosions:
+		var t := 1.0 - (exp.lifetime as float) / (exp.max_lifetime as float)
+		var current_r := (exp.radius as float) * t
+		var alpha := (1.0 - t) * 0.8
+		var is_ship: bool = exp.is_ship as bool
+		var ring_color := Color(1.0, 0.5, 0.1, alpha) if is_ship else Color(1.0, 0.9, 0.3, alpha)
+		if current_r > 1.0:
+			draw_arc(exp.pos as Vector2, current_r, 0.0, TAU, 32, ring_color, 2.5)
+
+
+func _draw_debris() -> void:
+	for d in game.debris:
+		var t := 1.0 - (d.lifetime as float) / (d.max_lifetime as float)
+		var alpha := (1.0 - t) * 0.9
+		var color := Color(1.0, 0.55, 0.15, alpha)
+		var size: float = d.size as float
+		var pos: Vector2 = d.pos as Vector2
+		var angle: float = d.angle as float
+		var p0 := pos + Vector2(cos(angle), sin(angle)) * size
+		var p1 := pos + Vector2(cos(angle + TAU * 0.333), sin(angle + TAU * 0.333)) * size
+		var p2 := pos + Vector2(cos(angle + TAU * 0.667), sin(angle + TAU * 0.667)) * size
+		draw_polygon(PackedVector2Array([p0, p1, p2]), PackedColorArray([color, color, color]))
