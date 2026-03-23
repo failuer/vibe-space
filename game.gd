@@ -340,6 +340,7 @@ func _handle_collisions() -> void:
                     if (enemy.hp as int) <= 0:
                         enemy.alive = false
                     missile.pos.x = SCENE_RADIUS * 2.0
+                    break  # one missile hits one target
         else:
             if player_alive and _circles_overlap(missile.pos, MISSILE_RADIUS, player_pos, PLAYER_RADIUS):
                 player_hp -= power
@@ -350,6 +351,8 @@ func _handle_collisions() -> void:
     # Ramming: damage based on relative speed, minimum 1
     if player_alive:
         for enemy in enemies:
+            if not player_alive:
+                break  # stop processing once player is dead
             if enemy.alive and _circles_overlap(player_pos, PLAYER_RADIUS, enemy.pos, ENEMY_RADIUS):
                 var rel_speed := (player_vel - (enemy.vel as Vector2)).length()
                 var ram_damage := maxi(1, int(rel_speed / 100.0))
