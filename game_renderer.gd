@@ -119,9 +119,11 @@ func _draw_planned_path() -> void:
 func _draw_planned_ghost() -> void:
 	var col := game.PLAYER_COLOR
 	col.a = 0.35
-	var end_pos := game._arc_endpoint(game.player_pos, game.player_vel.normalized(), game.planned_player_speed, game.planned_turn_angle)
+	var tip_pos := game._arc_endpoint(game.player_pos, game.player_vel.normalized(), game.planned_player_speed, game.planned_turn_angle)
 	var end_facing := game.player_vel.normalized().rotated(game.planned_turn_angle)
-	_draw_ship_triangle(end_pos, end_facing, game.PLAYER_RADIUS, col)
+	# Offset center back so the triangle TIP lands exactly at tip_pos (arc endpoint)
+	var center := tip_pos - end_facing.normalized() * game.PLAYER_RADIUS
+	_draw_ship_triangle(center, end_facing, game.PLAYER_RADIUS, col)
 
 
 func _draw_turn_wedge() -> void:
@@ -137,13 +139,15 @@ func _draw_turn_wedge() -> void:
 	for i in range(segments + 1):
 		var t := float(i) / float(segments)
 		var ang := -game.turn_limit_this_turn + 2.0 * game.turn_limit_this_turn * t
-		outer_pts.append(game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_max, ang))
+		var center := game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_max, ang)
+		outer_pts.append(center + forward_dir.rotated(ang) * game.PLAYER_RADIUS)
 
 	var inner_pts: Array[Vector2] = []
 	for i in range(segments + 1):
 		var t := float(i) / float(segments)
 		var ang := game.turn_limit_this_turn - 2.0 * game.turn_limit_this_turn * t
-		inner_pts.append(game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_min, ang))
+		var center := game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_min, ang)
+		inner_pts.append(center + forward_dir.rotated(ang) * game.PLAYER_RADIUS)
 
 	for i in range(outer_pts.size() - 1):
 		draw_line(outer_pts[i], outer_pts[i + 1], col, 1.0)
