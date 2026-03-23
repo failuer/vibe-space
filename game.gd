@@ -623,8 +623,13 @@ func _step_explosions(delta: float) -> void:
             living_explosions.append(exp)
     explosions = living_explosions
 
+    # Swap out debris before iterating so _spawn_explosion() calls from chain kills
+    # append to a fresh self.debris instead of the array we're processing.
+    var processing := debris
+    debris = []
+
     var living_debris: Array = []
-    for d in debris:
+    for d in processing:
         d.lifetime -= delta
         d.pos = (d.pos as Vector2) + (d.vel as Vector2) * delta
         d.angle = (d.angle as float) + (d.angular_vel as float) * delta
@@ -634,6 +639,7 @@ func _step_explosions(delta: float) -> void:
                 player_hp -= DEBRIS_HP_DAMAGE
                 if player_hp <= 0:
                     player_alive = false
+                    _spawn_explosion(player_pos, player_vel, true)
                 d.hp_dealt = true
             else:
                 for enemy in enemies:
@@ -647,7 +653,9 @@ func _step_explosions(delta: float) -> void:
 
         if (d.lifetime as float) > 0.0:
             living_debris.append(d)
-    debris = living_debris
+
+    # Merge survivors with any chain-kill debris spawned during this pass
+    debris = living_debris + debris
 
 
 func _circles_overlap(a_pos: Vector2, a_radius: float, b_pos: Vector2, b_radius: float) -> bool:
