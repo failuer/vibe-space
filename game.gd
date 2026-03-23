@@ -13,6 +13,7 @@ const MISSILE_RADIUS := 8.0
 const PLAYER_SPEED_DEFAULT := 140.0 # units per second
 const PLAYER_SPEED_MIN := 80.0
 const PLAYER_SPEED_MAX := 220.0
+const PLAYER_SPEED_DELTA := 80.0  # max speed change per turn (units/sec)
 const PLAYER_SPEED_STEP := 25.0
 const ENEMY_SPEED := 140.0
 const MISSILE_SPEED := 300.0
@@ -67,6 +68,9 @@ var player_speed: float = PLAYER_SPEED_DEFAULT
 var player_alive: bool = true
 var player_missiles_remaining: int = PLAYER_MAX_MISSILES
 var player_fire_cooldown: float = 0.0
+
+var turn_speed_min: float = PLAYER_SPEED_MIN
+var turn_speed_max: float = PLAYER_SPEED_MAX
 
 var planned_player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
 var planned_player_speed: float = PLAYER_SPEED_DEFAULT
@@ -139,6 +143,8 @@ func _reset_game() -> void:
     planned_turn_angle = 0.0
     current_turn_rate = 0.0
     turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
+    turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
+    turn_speed_max = player_speed + PLAYER_SPEED_DELTA
 
     # Simple enemy setup: a few ships moving straight
     enemies.clear()
@@ -260,6 +266,8 @@ func _step_simulation(delta: float) -> void:
             planned_player_vel = player_vel
             planned_player_speed = player_speed
             turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
+            turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
+            turn_speed_max = player_speed + PLAYER_SPEED_DELTA
 
 
 func _step_enemy_firing(_delta: float) -> void:
@@ -479,7 +487,7 @@ func _update_planned_vector(mouse_world: Vector2) -> void:
     var half_angle: float = angle_clamped * 0.5
     var arc_len: float = chord_len if abs(half_angle) < 1e-4 else chord_len * half_angle / sin(half_angle)
 
-    planned_player_speed = clamp(arc_len / SIM_DURATION, PLAYER_SPEED_MIN, PLAYER_SPEED_MAX)
+    planned_player_speed = clamp(arc_len / SIM_DURATION, turn_speed_min, turn_speed_max)
     planned_turn_angle = angle_clamped
     planned_player_vel = fwd.rotated(angle_clamped) * planned_player_speed
 

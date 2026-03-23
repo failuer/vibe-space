@@ -137,13 +137,13 @@ func _draw_turn_wedge() -> void:
 	for i in range(segments + 1):
 		var t := float(i) / float(segments)
 		var ang := -game.turn_limit_this_turn + 2.0 * game.turn_limit_this_turn * t
-		outer_pts.append(game._arc_endpoint(game.player_pos, forward_dir, game.PLAYER_SPEED_MAX, ang))
+		outer_pts.append(game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_max, ang))
 
 	var inner_pts: Array[Vector2] = []
 	for i in range(segments + 1):
 		var t := float(i) / float(segments)
 		var ang := game.turn_limit_this_turn - 2.0 * game.turn_limit_this_turn * t
-		inner_pts.append(game._arc_endpoint(game.player_pos, forward_dir, game.PLAYER_SPEED_MIN, ang))
+		inner_pts.append(game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_min, ang))
 
 	for i in range(outer_pts.size() - 1):
 		draw_line(outer_pts[i], outer_pts[i + 1], col, 1.0)
