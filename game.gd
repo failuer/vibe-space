@@ -57,6 +57,9 @@ const ENEMY_MAX_MISSILES := 6
 const ENEMY_FIRE_COOLDOWN := 3.5
 const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
 
+const EVASION_DETECT_RADIUS := 80.0   # px — missile proximity triggering evasion
+const ARCHETYPE_ROSTER := ["aggressor", "orbiter", "flanker"]
+
 const PLAYER_TURN_RATE := MAX_TURN_RADIANS * 1.5 / SIM_DURATION # baseline sharper turns
 
 const ARROW_MIN_DIST := PLAYER_SPEED_MIN * SIM_DURATION
@@ -151,6 +154,12 @@ func _generate_stars() -> void:
         _stars_by_layer.append(stars)
 
 
+func _make_ai_state(archetype: String) -> Dictionary:
+    match archetype:
+        "orbiter": return { "orbit_dir": 1, "evade_timer": 0.0 }
+        _:         return {}
+
+
 func _reset_game() -> void:
     # Initial player setup
     player_pos = Vector2.ZERO
@@ -169,32 +178,25 @@ func _reset_game() -> void:
     turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
     turn_speed_max = player_speed + PLAYER_SPEED_DELTA
 
-    # Simple enemy setup: a few ships moving straight
+    # Enemy setup — each slot maps to an archetype in ARCHETYPE_ROSTER
     enemies.clear()
-    enemies.append({
-        "pos": Vector2(300.0, 0.0),
-        "vel": Vector2.LEFT * ENEMY_SPEED,
-        "alive": true,
-        "missiles_remaining": ENEMY_MAX_MISSILES,
-        "fire_cooldown": 0.0,
-        "hp": ENEMY_MAX_HP,
-    })
-    enemies.append({
-        "pos": Vector2(-250.0, -150.0),
-        "vel": Vector2.RIGHT * ENEMY_SPEED,
-        "alive": true,
-        "missiles_remaining": ENEMY_MAX_MISSILES,
-        "fire_cooldown": 0.0,
-        "hp": ENEMY_MAX_HP,
-    })
-    enemies.append({
-        "pos": Vector2(0.0, 250.0),
-        "vel": Vector2.UP * ENEMY_SPEED,
-        "alive": true,
-        "missiles_remaining": ENEMY_MAX_MISSILES,
-        "fire_cooldown": 0.0,
-        "hp": ENEMY_MAX_HP,
-    })
+    var enemy_spawns := [
+        { "pos": Vector2(300.0, 0.0),     "vel": Vector2.LEFT  * ENEMY_SPEED },
+        { "pos": Vector2(-250.0, -150.0), "vel": Vector2.RIGHT * ENEMY_SPEED },
+        { "pos": Vector2(0.0, 250.0),     "vel": Vector2.UP    * ENEMY_SPEED },
+    ]
+    for i in enemy_spawns.size():
+        var archetype := ARCHETYPE_ROSTER[i % ARCHETYPE_ROSTER.size()]
+        enemies.append({
+            "pos":                enemy_spawns[i].pos,
+            "vel":                enemy_spawns[i].vel,
+            "alive":              true,
+            "missiles_remaining": ENEMY_MAX_MISSILES,
+            "fire_cooldown":      0.0,
+            "hp":                 ENEMY_MAX_HP,
+            "archetype":          archetype,
+            "ai_state":           _make_ai_state(archetype),
+        })
 
     missiles.clear()
     explosions.clear()
