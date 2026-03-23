@@ -11,3 +11,9 @@
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# macOS metadata
+.DS_Store
+
+# Godot auto-generated UID files
+*.uid
