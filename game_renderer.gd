@@ -12,10 +12,12 @@ func _draw() -> void:
 
 	if game.player_alive:
 		_draw_ship_triangle(game.player_pos, game.player_vel, game.PLAYER_RADIUS, game.PLAYER_COLOR)
+		_draw_hp_bar(game.player_pos, game.player_vel, game.PLAYER_RADIUS, game.player_hp, game.PLAYER_MAX_HP)
 
 	for enemy in game.enemies:
 		if enemy.alive:
 			_draw_ship_triangle(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, game.ENEMY_COLOR)
+			_draw_hp_bar(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, enemy.hp as int, game.ENEMY_MAX_HP)
 
 	for missile in game.missiles:
 		var col: Color = game.MISSILE_COLOR
@@ -27,6 +29,29 @@ func _draw() -> void:
 		_draw_turn_wedge()
 		_draw_planned_path()
 		_draw_planned_ghost()
+
+
+func _draw_hp_bar(center: Vector2, vel: Vector2, radius: float, current_hp: int, max_hp: int) -> void:
+	var fwd := vel.normalized() if vel != Vector2.ZERO else Vector2.UP
+	var bar_width := radius * 2.0
+	var bar_height := 4.0
+	var bar_offset := radius * 1.8
+	var bar_center := center - fwd * bar_offset
+	var bar_start := bar_center - Vector2(-fwd.y, fwd.x) * bar_width * 0.5
+
+	draw_rect(Rect2(bar_start - Vector2(0, bar_height * 0.5), Vector2(bar_width, bar_height)), Color(0, 0, 0, 0.5), true)
+
+	var ratio := float(current_hp) / float(max_hp)
+	var bar_color: Color
+	if ratio > 0.5:
+		bar_color = Color(0.3, 1.0, 0.3, 0.8)
+	elif ratio > 0.25:
+		bar_color = Color(1.0, 0.8, 0.1, 0.8)
+	else:
+		bar_color = Color(1.0, 0.2, 0.2, 0.8)
+
+	var fill_width := bar_width * ratio
+	draw_rect(Rect2(bar_start - Vector2(0, bar_height * 0.5), Vector2(fill_width, bar_height)), bar_color, true)
 
 
 func _draw_ship_triangle(center: Vector2, vel: Vector2, radius: float, color: Color) -> void:

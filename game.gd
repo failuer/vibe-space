@@ -31,6 +31,10 @@ const BORDER_COLOR := Color(1.0, 0.0, 0.0, 0.1)
 const PLAY_AREA_HALF_EXTENTS := Vector2(975.0, 675.0) # 50% larger
 const PLAY_BORDER_THICKNESS := 80.0
 
+const PLAYER_MAX_HP := 5
+const ENEMY_MAX_HP := 3
+const MISSILE_POWER := 2  # base power for all missiles
+
 const PLAYER_MAX_MISSILES := 10
 const PLAYER_FIRE_COOLDOWN := 4.0
 
@@ -66,6 +70,7 @@ var player_pos: Vector2 = Vector2.ZERO
 var player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
 var player_speed: float = PLAYER_SPEED_DEFAULT
 var player_alive: bool = true
+var player_hp: int = PLAYER_MAX_HP
 var player_missiles_remaining: int = PLAYER_MAX_MISSILES
 var player_fire_cooldown: float = 0.0
 
@@ -135,6 +140,7 @@ func _reset_game() -> void:
     player_vel = Vector2.UP * PLAYER_SPEED_DEFAULT
     player_speed = PLAYER_SPEED_DEFAULT
     player_alive = true
+    player_hp = PLAYER_MAX_HP
     player_missiles_remaining = PLAYER_MAX_MISSILES
     player_fire_cooldown = 0.0
     planned_player_vel = player_vel
@@ -154,6 +160,7 @@ func _reset_game() -> void:
         "alive": true,
         "missiles_remaining": ENEMY_MAX_MISSILES,
         "fire_cooldown": 0.0,
+        "hp": ENEMY_MAX_HP,
     })
     enemies.append({
         "pos": Vector2(-250.0, -150.0),
@@ -161,6 +168,7 @@ func _reset_game() -> void:
         "alive": true,
         "missiles_remaining": ENEMY_MAX_MISSILES,
         "fire_cooldown": 0.0,
+        "hp": ENEMY_MAX_HP,
     })
     enemies.append({
         "pos": Vector2(0.0, 250.0),
@@ -168,6 +176,7 @@ func _reset_game() -> void:
         "alive": true,
         "missiles_remaining": ENEMY_MAX_MISSILES,
         "fire_cooldown": 0.0,
+        "hp": ENEMY_MAX_HP,
     })
 
     missiles.clear()
@@ -297,6 +306,7 @@ func _step_enemy_firing(_delta: float) -> void:
             "pos": e_spawn,
             "vel": edir * MISSILE_SPEED,
             "from_player": false,
+            "power": MISSILE_POWER,
         })
         enemy.missiles_remaining -= 1
         enemy.fire_cooldown = ENEMY_FIRE_COOLDOWN
@@ -322,24 +332,33 @@ func _integrate_motion(delta: float) -> void:
 func _handle_collisions() -> void:
     # Missiles vs ships
     for missile in missiles:
+        var power: int = missile.get("power", 1) as int
         if missile.from_player:
-            # Check enemies
             for enemy in enemies:
                 if enemy.alive and _circles_overlap(missile.pos, MISSILE_RADIUS, enemy.pos, ENEMY_RADIUS):
-                    enemy.alive = false
-                    missile.pos.x = SCENE_RADIUS * 2.0 # push far away; will be culled
+                    enemy.hp = (enemy.hp as int) - power
+                    if (enemy.hp as int) <= 0:
+                        enemy.alive = false
+                    missile.pos.x = SCENE_RADIUS * 2.0
         else:
-            # Enemy missiles vs player (not used in MVP, but left for extension)
             if player_alive and _circles_overlap(missile.pos, MISSILE_RADIUS, player_pos, PLAYER_RADIUS):
-                player_alive = false
+                player_hp -= power
+                if player_hp <= 0:
+                    player_alive = false
                 missile.pos.x = SCENE_RADIUS * 2.0
 
-    # Player vs enemies direct collision (1-hit kill)
+    # Ramming: damage based on relative speed, minimum 1
     if player_alive:
         for enemy in enemies:
             if enemy.alive and _circles_overlap(player_pos, PLAYER_RADIUS, enemy.pos, ENEMY_RADIUS):
-                player_alive = false
-                enemy.alive = false
+                var rel_speed := (player_vel - (enemy.vel as Vector2)).length()
+                var ram_damage := maxi(1, int(rel_speed / 100.0))
+                player_hp -= ram_damage
+                enemy.hp = (enemy.hp as int) - ram_damage
+                if player_hp <= 0:
+                    player_alive = false
+                if (enemy.hp as int) <= 0:
+                    enemy.alive = false
 
 
 func _cull_offscreen_objects() -> void:
@@ -428,6 +447,7 @@ func _try_fire_player() -> void:
         "pos": spawn_pos,
         "vel": dir * MISSILE_SPEED,
         "from_player": true,
+        "power": MISSILE_POWER,
     })
     player_missiles_remaining -= 1
     player_fire_cooldown = PLAYER_FIRE_COOLDOWN
