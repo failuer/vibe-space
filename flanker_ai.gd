@@ -37,17 +37,17 @@ static func should_fire(enemy: Dictionary, game: Game) -> bool:
 		return false
 
 	# Must be positioned in the arc behind the player
-	var from_player_to_enemy := ((enemy.pos as Vector2) - game.player_pos).normalized()
-	var behind_facing        := -game.player_vel.normalized()
-	var dot                  := clamp(from_player_to_enemy.dot(behind_facing), -1.0, 1.0)
-	var angle_deg            := rad_to_deg(acos(dot))
+	var from_player_to_enemy: Vector2 = ((enemy.pos as Vector2) - game.player_pos).normalized()
+	var behind_facing: Vector2        = -game.player_vel.normalized()
+	var dot: float                    = clamp(from_player_to_enemy.dot(behind_facing), -1.0, 1.0)
+	var angle_deg: float              = rad_to_deg(acos(dot))
 	return angle_deg < FIRE_ANGLE
 
 static func evade_missile(enemy: Dictionary, missile_pos: Vector2, missile_vel: Vector2, _game_delta: float) -> Vector2:
 	# Full lateral impulse perpendicular to missile velocity, toward the safer side
-	var missile_norm := missile_vel.normalized()
-	var perp         := Vector2(-missile_norm.y, missile_norm.x)
-	var side         := sign(perp.dot((enemy.pos as Vector2) - missile_pos))
+	var missile_norm: Vector2 = missile_vel.normalized()
+	var perp: Vector2         = Vector2(-missile_norm.y, missile_norm.x)
+	var side: float           = sign(perp.dot((enemy.pos as Vector2) - missile_pos))
 	if side == 0.0:
 		side = 1.0
 	return perp * side * EVADE_STRENGTH
