@@ -16,16 +16,16 @@ static func steer(enemy: Dictionary, game: Game, game_delta: float) -> Vector2:
 			enemy.ai_state.evade_timer = 0.0
 			enemy.ai_state.orbit_dir   = -int(enemy.ai_state.orbit_dir)  # flip back
 
-	var to_player := game.player_pos - (enemy.pos as Vector2)
-	var dist      := to_player.length()
+	var to_player: Vector2 = game.player_pos - (enemy.pos as Vector2)
+	var dist: float = to_player.length()
 	if dist < 0.001:
 		return Vector2.ZERO  # on top of player — avoid zero-vector normalization
 
-	var radial  := to_player / dist                                                  # toward player
+	var radial: Vector2 = to_player / dist                                                  # toward player
 	var tangent: Vector2 = Vector2(-radial.y, radial.x) * int(enemy.ai_state.orbit_dir)  # perpendicular
 
 	# Blend: push toward orbit radius radially, circle tangentially
-	var correction := clamp((dist - ORBIT_RADIUS) / ORBIT_RADIUS, -1.0, 1.0)
+	var correction: float = clamp((dist - ORBIT_RADIUS) / ORBIT_RADIUS, -1.0, 1.0)
 	var desired: Vector2 = radial * correction * RADIAL_STRENGTH + tangent * (1.0 - RADIAL_STRENGTH)
 	if desired.length() < 0.001:
 		return tangent * SPEED
