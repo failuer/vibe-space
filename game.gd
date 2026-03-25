@@ -188,6 +188,8 @@ func _reset_game() -> void:
         { "pos": Vector2(300.0, 0.0),     "vel": Vector2.LEFT  * ENEMY_SPEED },
         { "pos": Vector2(-250.0, -150.0), "vel": Vector2.RIGHT * ENEMY_SPEED },
         { "pos": Vector2(0.0, 250.0),     "vel": Vector2.UP    * ENEMY_SPEED },
+        { "pos": Vector2(-300.0, 200.0),  "vel": Vector2.RIGHT * ENEMY_SPEED },
+        { "pos": Vector2(150.0, -280.0),  "vel": Vector2.DOWN  * ENEMY_SPEED },
     ]
     for i in enemy_spawns.size():
         var archetype: String = ARCHETYPE_ROSTER[i % ARCHETYPE_ROSTER.size()]

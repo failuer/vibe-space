@@ -16,7 +16,8 @@ func _draw() -> void:
 
     for enemy in game.enemies:
         if enemy.alive:
-            _draw_ship_triangle(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, game.ENEMY_COLOR)
+            var ecol: Color = _enemy_color(enemy.archetype as String)
+            _draw_ship_triangle(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, ecol)
             _draw_hp_bar(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, enemy.hp as int, game.ENEMY_MAX_HP)
 
     for missile in game.missiles:
@@ -55,6 +56,13 @@ func _draw_hp_bar(center: Vector2, vel: Vector2, radius: float, current_hp: int,
 
     var fill_width := bar_width * ratio
     draw_rect(Rect2(bar_start - Vector2(0, bar_height * 0.5), Vector2(fill_width, bar_height)), bar_color, true)
+
+
+func _enemy_color(archetype: String) -> Color:
+    match archetype:
+        "orbiter": return Color(1.0, 0.55, 0.1)   # orange
+        "flanker": return Color(0.65, 0.4, 1.0)   # purple
+        _:         return game.ENEMY_COLOR          # red (aggressor)
 
 
 func _draw_ship_triangle(center: Vector2, vel: Vector2, radius: float, color: Color) -> void:
