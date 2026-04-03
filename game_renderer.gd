@@ -33,6 +33,7 @@ func _draw() -> void:
     _draw_debris()
     _draw_scrap()
     _draw_tractor_beam()
+    _draw_mines()
 
     if game.phase == Game.GamePhase.PLANNING and game.player_alive:
         _draw_thrust_arrow()
@@ -334,6 +335,41 @@ func _draw_tractor_beam() -> void:
 
     draw_line(game.player_pos, ppos, beam_col, 1.5)
     draw_circle(ppos, game.SCRAP_RADIUS * 1.3, Color(beam_col.r, beam_col.g, beam_col.b, 0.25))
+
+
+func _draw_mines() -> void:
+    for mine in game.mines:
+        if not (mine.alive as bool):
+            continue
+        var pos:      Vector2 = mine.pos as Vector2
+        var armed:    bool    = float(mine.arm_timer) <= 0.0
+        var triggered: bool   = mine.triggered as bool
+        var r:        float   = game.MINE_RADIUS
+        var col:      Color   = game.MINE_COLOR
+
+        # Pulse alpha when triggered
+        var alpha: float = 1.0
+        if triggered:
+            alpha = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)
+
+        # 8 spike lines + tip dots
+        for i: int in 8:
+            var a: float       = float(i) * TAU / 8.0
+            var inner: Vector2 = pos + Vector2(cos(a), sin(a)) * r
+            var outer: Vector2 = pos + Vector2(cos(a), sin(a)) * (r + 5.0)
+            draw_line(inner, outer, Color(col.r, col.g, col.b, alpha * 0.9), 1.5)
+            draw_circle(outer, 1.2, Color(col.r, col.g, col.b, alpha))
+
+        # Body circle
+        var fill_col: Color = Color(col.r, col.g, col.b, alpha * 0.15)
+        draw_circle(pos, r, fill_col)
+        draw_arc(pos, r, 0.0, TAU, 24, Color(col.r, col.g, col.b, alpha), 1.5)
+
+        # Arming ring (shrinks during arming phase)
+        if not armed:
+            var arm_ratio: float = float(mine.arm_timer) / game.MINE_ARM_TIME
+            draw_arc(pos, r * (1.0 + arm_ratio * 0.5), 0.0, TAU, 16,
+                     Color(col.r, col.g, col.b, 0.3 * arm_ratio), 1.0)
 
 
 func _draw_debris() -> void:

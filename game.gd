@@ -70,6 +70,14 @@ const PLAYER_MAX_HOMING      := 5
 const PLAYER_HOMING_COOLDOWN := 4.5
 const HOMING_TURN_RATE       := 1.2   # radians/sec steering correction
 
+# ── Mine ─────────────────────────────────────────────────────────────────────
+const PLAYER_MAX_MINES     := 3
+const PLAYER_MINE_COOLDOWN := 2.0
+const MINE_RADIUS          := 9.0
+const MINE_ARM_TIME        := 1.0   # seconds before proximity trigger activates
+const MINE_TRIGGER_RADIUS  := 40.0  # proximity detection radius
+const MINE_TRIGGER_DELAY   := 0.2   # seconds after trigger before detonation
+
 const ENEMY_MAX_MISSILES := 6
 const ENEMY_FIRE_COOLDOWN := 3.5
 const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
@@ -120,6 +128,10 @@ var player_fire_cooldown: float = 0.0
 var player_homing_remaining: int   = PLAYER_MAX_HOMING
 var player_homing_cooldown:  float = 0.0
 var active_weapon: int = 0   # 0 = missile, 1 = homing, 2 = mine
+var player_mine_remaining: int   = PLAYER_MAX_MINES
+var player_mine_cooldown:  float = 0.0
+var mines: Array = []
+# mine dict: {pos, vel, arm_timer, trigger_timer, triggered, alive}
 
 var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_cooldown}
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
@@ -199,6 +211,9 @@ func _reset_game() -> void:
     player_homing_remaining = PLAYER_MAX_HOMING
     player_homing_cooldown  = 0.0
     active_weapon           = 0
+    player_mine_remaining = PLAYER_MAX_MINES
+    player_mine_cooldown  = 0.0
+    mines.clear()
 
     # Enemy setup — each slot maps to an archetype in ARCHETYPE_ROSTER
     enemies.clear()
@@ -328,6 +343,8 @@ func _step_simulation(delta: float) -> void:
             player_fire_cooldown = maxf(0.0, player_fire_cooldown - game_delta)
         if player_homing_cooldown > 0.0:
             player_homing_cooldown = maxf(0.0, player_homing_cooldown - game_delta)
+        if player_mine_cooldown > 0.0:
+            player_mine_cooldown = maxf(0.0, player_mine_cooldown - game_delta)
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
@@ -398,6 +415,7 @@ func _step_simulation(delta: float) -> void:
         _integrate_motion(game_delta)
         _handle_collisions()
         _step_explosions(game_delta)
+        _step_mines(game_delta)
         _check_leave_play_area()
         _cull_offscreen_objects()
 
@@ -568,6 +586,18 @@ func _handle_collisions() -> void:
                 _spawn_explosion(hit_pos, missile.vel as Vector2, false)
                 missile.pos.x = SCENE_RADIUS * 2.0
 
+    # Missile hits on mines — mine detonates instantly
+    for mine in mines:
+        if not (mine.alive as bool):
+            continue
+        for missile in missiles:
+            if _circles_overlap(missile.pos as Vector2, MISSILE_RADIUS, mine.pos as Vector2, MINE_RADIUS):
+                _spawn_explosion(mine.pos as Vector2, mine.vel as Vector2, false)
+                _apply_blast_impulse(mine.pos as Vector2, EXPLOSION_BLAST_RADIUS_MISSILE)
+                mine.alive    = false
+                missile.pos.x = SCENE_RADIUS * 2.0
+                break
+
     # Ramming: damage based on relative speed, minimum 1
     if player_alive:
         for enemy in enemies:
@@ -603,6 +633,12 @@ func _cull_offscreen_objects() -> void:
         if (piece.pos as Vector2).length() <= SCENE_RADIUS:
             live_scrap.append(piece)
     scrap = live_scrap
+
+    var live_mines_culled: Array = []
+    for mine in mines:
+        if (mine.pos as Vector2).length() <= SCENE_RADIUS:
+            live_mines_culled.append(mine)
+    mines = live_mines_culled
 
 
 func _check_leave_play_area() -> void:
@@ -729,7 +765,71 @@ func _fire_homing() -> void:
 
 
 func _fire_mine() -> void:
-    pass  # stub — implemented in Task 7
+    if player_mine_remaining <= 0 or player_mine_cooldown > 0.0:
+        return
+    mines.append({
+        "pos":           player_pos,
+        "vel":           player_vel,
+        "arm_timer":     MINE_ARM_TIME,
+        "trigger_timer": 0.0,
+        "triggered":     false,
+        "alive":         true,
+    })
+    player_mine_remaining -= 1
+    player_mine_cooldown   = PLAYER_MINE_COOLDOWN
+
+
+func _step_mines(delta: float) -> void:
+    var live_mines: Array = []
+    for mine in mines:
+        if not (mine.alive as bool):
+            continue
+
+        # Drift
+        mine.pos = (mine.pos as Vector2) + (mine.vel as Vector2) * delta
+
+        # Tick arm timer
+        if float(mine.arm_timer) > 0.0:
+            mine.arm_timer = maxf(0.0, float(mine.arm_timer) - delta)
+
+        # Tick trigger countdown
+        if (mine.triggered as bool):
+            mine.trigger_timer = maxf(0.0, float(mine.trigger_timer) - delta)
+            if float(mine.trigger_timer) <= 0.0:
+                _spawn_explosion(mine.pos as Vector2, mine.vel as Vector2, false)
+                _apply_blast_impulse(mine.pos as Vector2, EXPLOSION_BLAST_RADIUS_MISSILE)
+                mine.alive = false
+                continue
+
+        # Proximity check (only when armed and not yet triggered)
+        if float(mine.arm_timer) <= 0.0 and not (mine.triggered as bool):
+            var mpos: Vector2    = mine.pos as Vector2
+            var triggered: bool  = false
+
+            # Check player
+            if player_alive and mpos.distance_to(player_pos) < MINE_TRIGGER_RADIUS:
+                triggered = true
+
+            # Check enemies
+            if not triggered:
+                for enemy in enemies:
+                    if (enemy.alive as bool) and mpos.distance_to(enemy.pos as Vector2) < MINE_TRIGGER_RADIUS:
+                        triggered = true
+                        break
+
+            # Check scrap
+            if not triggered:
+                for piece in scrap:
+                    if mpos.distance_to(piece.pos as Vector2) < MINE_TRIGGER_RADIUS:
+                        triggered = true
+                        break
+
+            if triggered:
+                mine.triggered     = true
+                mine.trigger_timer = MINE_TRIGGER_DELAY
+
+        live_mines.append(mine)
+    mines = live_mines
 
 
 func _update_fire_button_ui() -> void:
