@@ -209,7 +209,7 @@ func _draw_thrust_arrow() -> void:
     var arrow_len: float = ratio * game.THRUST_ARROW_MAX_LEN
 
     var tip: Vector2    = game.player_pos + dir * arrow_len
-    var shaft_col       := Color(0.3, 1.0, 0.45, 0.7)
+    var shaft_col: Color = Color(0.3, 1.0, 0.45, 0.7)
     var head_size: float = 8.0
 
     # Shaft
@@ -234,8 +234,9 @@ func _draw_thrust_preview() -> void:
     var ppos: Vector2 = game.player_pos
     var pvel: Vector2 = game.player_vel
     var accel: Vector2 = thrust / mass
+    # Gravity intentionally omitted — this is a "dumb" preview (see design spec Section 2).
 
-    var dot_col := Color(0.3, 1.0, 0.45, 0.35)
+    var dot_col: Color = Color(0.3, 1.0, 0.45, 0.35)
     for i in steps:
         pvel += accel * dt
         ppos += pvel * dt
