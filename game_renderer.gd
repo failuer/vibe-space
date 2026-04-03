@@ -272,7 +272,7 @@ func _draw_scrap() -> void:
 
         # Irregular hexagon — 6 verts with slight radius variation
         var verts: PackedVector2Array = PackedVector2Array()
-        var offsets: Array = [0.9, 1.1, 0.8, 1.0, 1.15, 0.85]
+        var offsets: Array[float] = [0.9, 1.1, 0.8, 1.0, 1.15, 0.85]
         for i: int in 6:
             var a: float = angle + float(i) * TAU / 6.0
             verts.append(pos + Vector2(cos(a), sin(a)) * r * float(offsets[i]))
