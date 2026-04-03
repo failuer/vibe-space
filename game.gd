@@ -72,6 +72,13 @@ const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
 const EVASION_DETECT_RADIUS := 80.0   # px — missile proximity triggering evasion
 const ARCHETYPE_ROSTER := ["aggressor", "orbiter", "flanker"]
 
+# ── Tractor beam ─────────────────────────────────────────────────────────────
+const TRACTOR_RANGE        := 250.0   # search radius (units)
+const TRACTOR_SPRING_K     := 0.2     # spring constant for reel-in force
+const TRACTOR_DOCKING_DIST := 30.0   # distance at which scrap is absorbed
+const TETHER_LENGTH        := 200.0   # max tether length when over-capacity
+const PLAYER_CARGO_CAP     := 4.0     # max tonnes that can be absorbed
+
 # ── Scrap ────────────────────────────────────────────────────────────────────
 const SCRAP_RADIUS         := 10.0
 const SCRAP_MASS_MIN       := 1.0   # tonnes
@@ -111,6 +118,11 @@ var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
 var explosions: Array = []  # each: {pos, vel, lifetime, max_lifetime, radius, is_ship}
 var debris: Array = []  # each: {pos, vel, angle, angular_vel, lifetime, max_lifetime, size, hp_dealt: bool}
 var scrap: Array = []  # each: {pos, vel, mass, force_acc, angle, angular_vel}
+
+# ── Tractor beam state ────────────────────────────────────────────────────────
+var tractor_active: bool       = false
+var tractor_target: int        = -1    # index into scrap[], -1 = no target
+var player_cargo_aboard: float = 0.0
 
 var end_state: StringName = ""
 var end_timer: float = 0.0
@@ -212,6 +224,10 @@ func _reset_game() -> void:
         var drift_vel: Vector2 = Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0))
         _spawn_scrap_piece(spawn_pos, drift_vel)
 
+    tractor_active      = false
+    tractor_target      = -1
+    player_cargo_aboard = 0.0
+
     phase = GamePhase.PLANNING
     sim_time_left = 0.0
     end_state = ""
@@ -245,6 +261,10 @@ func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventKey and event.pressed and not event.echo:
         if event.keycode == KEY_SPACE:
             _try_fire_player()
+        if event.keycode == KEY_T:
+            tractor_active = not tractor_active
+            if not tractor_active:
+                tractor_target = -1
 
     if phase != GamePhase.PLANNING:
         return
@@ -330,7 +350,10 @@ func _step_simulation(delta: float) -> void:
                     var evade_impulse: Vector2 = evade_delta * float(enemy.mass) / maxf(game_delta, 0.001)
                     enemy.force_acc = (enemy.force_acc as Vector2) + evade_impulse
 
-        # 3. Physics integration (uses velocities set by AI dispatcher)
+        # 3. Tractor beam spring / tether (before integration so forces are included)
+        _step_tractor_beam(game_delta)
+
+        # 4. Physics integration (uses velocities set by AI dispatcher)
         _integrate_motion(game_delta)
         _handle_collisions()
         _step_explosions(game_delta)
@@ -343,6 +366,67 @@ func _step_simulation(delta: float) -> void:
     if sim_time_left <= 0.0 and phase == GamePhase.SIMULATING:
         phase = GamePhase.PLANNING
         # player_vel naturally carries over — no momentum re-initialisation needed
+
+
+func _step_tractor_beam(delta: float) -> void:
+    if not tractor_active or not player_alive:
+        return
+
+    # Re-validate target index (scrap array may have changed)
+    if tractor_target >= scrap.size():
+        tractor_target = -1
+
+    # Search for nearest target if none
+    if tractor_target == -1:
+        var nearest_dist: float = TRACTOR_RANGE
+        var nearest_idx:  int   = -1
+        for i: int in scrap.size():
+            var d: float = player_pos.distance_to(scrap[i].pos as Vector2)
+            if d < nearest_dist:
+                nearest_dist = d
+                nearest_idx  = i
+        tractor_target = nearest_idx
+        return  # start pulling next tick
+
+    var piece: Dictionary = scrap[tractor_target]
+    var diff: Vector2     = player_pos - (piece.pos as Vector2)
+    var dist: float       = diff.length()
+    if dist < 1.0:
+        return
+
+    var remaining_cap: float = PLAYER_CARGO_CAP - player_cargo_aboard
+    var fits: bool           = float(piece.mass) <= remaining_cap + 0.01
+
+    if fits:
+        # ── Spring reel-in ───────────────────────────────────────────────────
+        var spring_force: Vector2 = diff.normalized() * TRACTOR_SPRING_K * dist
+        piece.force_acc = (piece.force_acc as Vector2) + spring_force
+        # Reaction force on player (equal and opposite, mass-weighted feel)
+        player_force_acc += -spring_force * (float(piece.mass) / player_mass)
+
+        # Absorb when close enough
+        if dist <= TRACTOR_DOCKING_DIST:
+            player_cargo_aboard += float(piece.mass)
+            player_mass         += float(piece.mass)
+            scrap.remove_at(tractor_target)
+            tractor_target = -1
+
+    else:
+        # ── Over-capacity: rigid tether (pendulum constraint) ─────────────────
+        if dist > TETHER_LENGTH:
+            var penetration: float = dist - TETHER_LENGTH
+            var axis: Vector2      = diff.normalized()
+            var total_mass: float  = player_mass + float(piece.mass)
+            # Position correction split by mass ratio
+            player_pos             += axis * penetration * (float(piece.mass) / total_mass)
+            piece.pos               = (piece.pos as Vector2) + (-axis) * penetration * (player_mass / total_mass)
+            # Remove outward velocity component from both bodies
+            var player_outward: float = player_vel.dot(-axis)
+            var piece_outward: float  = (piece.vel as Vector2).dot(axis)
+            if player_outward < 0.0:
+                player_vel -= -axis * player_outward
+            if piece_outward < 0.0:
+                piece.vel = (piece.vel as Vector2) - axis * piece_outward
 
 
 func _integrate_motion(delta: float) -> void:

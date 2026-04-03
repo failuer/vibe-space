@@ -29,6 +29,7 @@ func _draw() -> void:
     _draw_explosions()
     _draw_debris()
     _draw_scrap()
+    _draw_tractor_beam()
 
     if game.phase == Game.GamePhase.PLANNING and game.player_alive:
         _draw_thrust_arrow()
@@ -284,6 +285,31 @@ func _draw_scrap() -> void:
         # Outline
         for i: int in 6:
             draw_line(verts[i], verts[(i + 1) % 6], Color(col.r, col.g, col.b, 0.5), 1.0)
+
+
+func _draw_tractor_beam() -> void:
+    if not game.tractor_active or not game.player_alive:
+        return
+
+    var gold: Color = Color(0.961, 0.773, 0.259)  # #f5c542
+    var red: Color  = Color(1.0, 0.267, 0.267, 0.8)
+
+    if game.tractor_target == -1:
+        # Searching — draw a pulsing circle stub
+        draw_circle(game.player_pos, 6.0, Color(gold.r, gold.g, gold.b, 0.4))
+        return
+
+    if game.tractor_target >= game.scrap.size():
+        return
+
+    var piece: Dictionary  = game.scrap[game.tractor_target]
+    var ppos: Vector2      = piece.pos as Vector2
+    var remaining_cap: float = game.PLAYER_CARGO_CAP - game.player_cargo_aboard
+    var fits: bool           = float(piece.mass) <= remaining_cap + 0.01
+    var beam_col: Color      = gold if fits else red
+
+    draw_line(game.player_pos, ppos, beam_col, 1.5)
+    draw_circle(ppos, game.SCRAP_RADIUS * 1.3, Color(beam_col.r, beam_col.g, beam_col.b, 0.25))
 
 
 func _draw_debris() -> void:
