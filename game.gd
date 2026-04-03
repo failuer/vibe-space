@@ -804,27 +804,27 @@ func _step_mines(delta: float) -> void:
         # Proximity check (only when armed and not yet triggered)
         if float(mine.arm_timer) <= 0.0 and not (mine.triggered as bool):
             var mpos: Vector2    = mine.pos as Vector2
-            var triggered: bool  = false
+            var proximity_hit: bool  = false
 
             # Check player
             if player_alive and mpos.distance_to(player_pos) < MINE_TRIGGER_RADIUS:
-                triggered = true
+                proximity_hit = true
 
             # Check enemies
-            if not triggered:
+            if not proximity_hit:
                 for enemy in enemies:
                     if (enemy.alive as bool) and mpos.distance_to(enemy.pos as Vector2) < MINE_TRIGGER_RADIUS:
-                        triggered = true
+                        proximity_hit = true
                         break
 
             # Check scrap
-            if not triggered:
+            if not proximity_hit:
                 for piece in scrap:
                     if mpos.distance_to(piece.pos as Vector2) < MINE_TRIGGER_RADIUS:
-                        triggered = true
+                        proximity_hit = true
                         break
 
-            if triggered:
+            if proximity_hit:
                 mine.triggered     = true
                 mine.trigger_timer = MINE_TRIGGER_DELAY
 
