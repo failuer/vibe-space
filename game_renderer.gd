@@ -30,9 +30,8 @@ func _draw() -> void:
     _draw_debris()
 
     if game.phase == Game.GamePhase.PLANNING and game.player_alive:
-        _draw_turn_wedge()
-        _draw_planned_path()
-        _draw_planned_ghost()
+        _draw_thrust_arrow()
+        _draw_thrust_preview()
 
 
 func _draw_hp_bar(center: Vector2, vel: Vector2, radius: float, current_hp: int, max_hp: int) -> void:
@@ -198,68 +197,55 @@ func _draw_starfield() -> void:
                     draw_circle(world_pos, radius, game.STAR_COLOR)
 
 
-func _draw_planned_path() -> void:
-    var steps := 18
-    var dt := game.SIM_DURATION / float(steps)
+func _draw_thrust_arrow() -> void:
+    var thrust: Vector2 = game.planned_thrust
+    if thrust == Vector2.ZERO:
+        return
+    var raw_len: float = thrust.length()
+    if raw_len < 1.0:
+        return
+    var ratio: float    = minf(raw_len / game.MAX_PLAYER_THRUST, 1.0)
+    var dir: Vector2    = thrust.normalized()
+    var arrow_len: float = ratio * game.THRUST_ARROW_MAX_LEN
 
-    var preview_pos := game.player_pos
-    var preview_vel := game.player_vel
-    var preview_speed := game.planned_player_speed
-    var preview_turn_rate: float = 0.0
-    if game.SIM_DURATION > 0.0:
-        preview_turn_rate = game.planned_turn_angle / game.SIM_DURATION
+    var tip: Vector2    = game.player_pos + dir * arrow_len
+    var shaft_col       := Color(0.3, 1.0, 0.45, 0.7)
+    var head_size: float = 8.0
 
-    var prev := preview_pos
+    # Shaft
+    draw_line(game.player_pos, tip, shaft_col, 2.0)
+
+    # Arrowhead
+    var perp: Vector2 = Vector2(-dir.y, dir.x)
+    draw_line(tip, tip - dir * head_size + perp * head_size * 0.5, shaft_col, 2.0)
+    draw_line(tip, tip - dir * head_size - perp * head_size * 0.5, shaft_col, 2.0)
+
+    # Dim indicator dot when thrust is at max (mouse beyond max range)
+    if ratio >= 1.0:
+        draw_circle(tip, 3.0, Color(0.3, 1.0, 0.45, 0.4))
+
+
+func _draw_thrust_preview() -> void:
+    var thrust: Vector2  = game.planned_thrust
+    var steps: int       = 20
+    var dt: float        = game.SIM_DURATION / float(steps)
+    var mass: float      = game.player_mass
+
+    var ppos: Vector2 = game.player_pos
+    var pvel: Vector2 = game.player_vel
+    var accel: Vector2 = thrust / mass
+
+    var dot_col := Color(0.3, 1.0, 0.45, 0.35)
     for i in steps:
-        var step_angle := preview_turn_rate * dt
-        if step_angle != 0.0:
-            preview_vel = preview_vel.rotated(step_angle)
-        preview_vel = preview_vel.normalized() * preview_speed
-        preview_pos += preview_vel * dt
-        draw_line(prev, preview_pos, game.PLANNED_VECTOR_COLOR, 2.0)
-        prev = preview_pos
+        pvel += accel * dt
+        ppos += pvel * dt
+        draw_circle(ppos, 2.5, dot_col)
 
-
-func _draw_planned_ghost() -> void:
-    var col := game.PLAYER_COLOR
-    col.a = 0.35
-    var tip_pos := game._arc_endpoint(game.player_pos, game.player_vel.normalized(), game.planned_player_speed, game.planned_turn_angle)
-    var end_facing := game.player_vel.normalized().rotated(game.planned_turn_angle)
-    # Offset center back so the triangle TIP lands exactly at tip_pos (arc endpoint)
-    var center := tip_pos - end_facing.normalized() * game.PLAYER_RADIUS
-    _draw_ship_triangle(center, end_facing, game.PLAYER_RADIUS, col)
-
-
-func _draw_turn_wedge() -> void:
-    var forward_dir := game.player_vel.normalized()
-    if forward_dir == Vector2.ZERO:
-        forward_dir = Vector2.UP
-
-    var segments: int = 40
-    var col := game.PLANNED_VECTOR_COLOR
-    col.a = 0.25
-
-    var outer_pts: Array[Vector2] = []
-    for i in range(segments + 1):
-        var t := float(i) / float(segments)
-        var ang := -game.turn_limit_this_turn + 2.0 * game.turn_limit_this_turn * t
-        var center := game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_max, ang)
-        outer_pts.append(center + forward_dir.rotated(ang) * game.PLAYER_RADIUS)
-
-    var inner_pts: Array[Vector2] = []
-    for i in range(segments + 1):
-        var t := float(i) / float(segments)
-        var ang := game.turn_limit_this_turn - 2.0 * game.turn_limit_this_turn * t
-        var center := game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_min, ang)
-        inner_pts.append(center + forward_dir.rotated(ang) * game.PLAYER_RADIUS)
-
-    for i in range(outer_pts.size() - 1):
-        draw_line(outer_pts[i], outer_pts[i + 1], col, 1.0)
-    for i in range(inner_pts.size() - 1):
-        draw_line(inner_pts[i], inner_pts[i + 1], col, 1.0)
-
-    draw_line(outer_pts[0], inner_pts[inner_pts.size() - 1], col, 1.0)
-    draw_line(outer_pts[outer_pts.size() - 1], inner_pts[0], col, 1.0)
+    # Ghost ship at endpoint, facing predicted velocity
+    if pvel.length() > 0.1:
+        var ghost_col: Color = game.PLAYER_COLOR
+        ghost_col.a   = 0.3
+        _draw_ship_triangle(ppos, pvel, game.PLAYER_RADIUS, ghost_col)
 
 
 func _draw_explosions() -> void:
