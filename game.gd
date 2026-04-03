@@ -16,13 +16,13 @@ const MISSILE_RADIUS := 8.0
 
 const ENEMY_SPEED := 140.0
 const MISSILE_SPEED := 300.0
-const SCENE_RADIUS := 1000.0 # missiles/enemies beyond this are considered gone
+const SCENE_RADIUS := 2000.0 # missiles/enemies beyond this are considered gone
 
 # ── Physics ─────────────────────────────────────────────────────────────────
 const PLAYER_MASS             := 10.0   # tonnes
 const ENEMY_MASS              := 8.0    # tonnes
 const MAX_PLAYER_THRUST       := 1200.0 # force units — gives ~120 units/s² at base mass
-const MAX_ENEMY_THRUST        := 1000.0
+const MAX_ENEMY_THRUST        := 500.0
 const GRAVITY_EMIT_MIN_MASS   := 6.0    # bodies below this mass don't emit gravity
 
 # ── Planning UI ──────────────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ const SCRAP_COLOR         := Color(0.627, 0.659, 0.690)  # grey  #a0a8b0
 const ENEMY_MISSILE_COLOR := Color(1.0, 0.6, 0.2)
 const STAR_COLOR := Color(0.85, 0.90, 1.0, 0.45)
 
-const PLAY_AREA_HALF_EXTENTS := Vector2(975.0, 675.0) # 50% larger
+const PLAY_AREA_HALF_EXTENTS := Vector2(1950.0, 1350.0)
 const PLAY_BORDER_THICKNESS := 80.0
 
 const PLAYER_MAX_HP := 5
@@ -120,7 +120,7 @@ var sim_time_left: float = 0.0
 var sim_real_elapsed: float = 0.0
 
 var player_pos: Vector2 = Vector2.ZERO
-var player_vel: Vector2 = Vector2.UP * 80.0    # initial drift velocity
+var player_vel: Vector2 = Vector2.ZERO
 var player_mass: float = PLAYER_MASS
 var player_force_acc: Vector2 = Vector2.ZERO
 var planned_thrust: Vector2 = Vector2.ZERO     # set each planning phase
@@ -327,7 +327,7 @@ func _make_ai_state(archetype: String) -> Dictionary:
 func _reset_game() -> void:
     # Initial player setup
     player_pos = Vector2.ZERO
-    player_vel       = Vector2.UP * 80.0
+    player_vel       = Vector2.ZERO
     player_mass      = PLAYER_MASS
     player_force_acc = Vector2.ZERO
     planned_thrust   = Vector2.ZERO
@@ -345,11 +345,11 @@ func _reset_game() -> void:
     # Enemy setup — each slot maps to an archetype in ARCHETYPE_ROSTER
     enemies.clear()
     var enemy_spawns := [
-        { "pos": Vector2(300.0, 0.0),     "vel": Vector2.LEFT  * ENEMY_SPEED },
-        { "pos": Vector2(-250.0, -150.0), "vel": Vector2.RIGHT * ENEMY_SPEED },
-        { "pos": Vector2(0.0, 250.0),     "vel": Vector2.UP    * ENEMY_SPEED },
-        { "pos": Vector2(-300.0, 200.0),  "vel": Vector2.RIGHT * ENEMY_SPEED },
-        { "pos": Vector2(150.0, -280.0),  "vel": Vector2.DOWN  * ENEMY_SPEED },
+        { "pos": Vector2(600.0, 0.0),      "vel": Vector2.ZERO },
+        { "pos": Vector2(-500.0, -300.0),  "vel": Vector2.ZERO },
+        { "pos": Vector2(0.0, 500.0),      "vel": Vector2.ZERO },
+        { "pos": Vector2(-600.0, 400.0),   "vel": Vector2.ZERO },
+        { "pos": Vector2(300.0, -560.0),   "vel": Vector2.ZERO },
     ]
     for i in enemy_spawns.size():
         var archetype: String = ARCHETYPE_ROSTER[i % ARCHETYPE_ROSTER.size()]
@@ -372,7 +372,7 @@ func _reset_game() -> void:
     scrap.clear()
     for _i in SCRAP_SPAWN_COUNT:
         var angle: float  = randf() * TAU
-        var dist: float   = randf_range(200.0, 500.0)
+        var dist: float   = randf_range(400.0, 900.0)
         var spawn_pos: Vector2 = Vector2(cos(angle), sin(angle)) * dist
         var drift_vel: Vector2 = Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0))
         _spawn_scrap_piece(spawn_pos, drift_vel)
@@ -895,8 +895,10 @@ func _fire_homing() -> void:
 func _fire_mine() -> void:
     if player_mine_remaining <= 0 or player_mine_cooldown > 0.0:
         return
+    var back_dir: Vector2 = -player_vel.normalized() if player_vel.length() > 0.1 else Vector2.DOWN
+    var drop_pos: Vector2 = player_pos + back_dir * (PLAYER_RADIUS + MINE_RADIUS + 4.0)
     mines.append({
-        "pos":           player_pos,
+        "pos":           drop_pos,
         "vel":           player_vel,
         "arm_timer":     MINE_ARM_TIME,
         "trigger_timer": 0.0,
