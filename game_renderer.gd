@@ -21,10 +21,13 @@ func _draw() -> void:
             _draw_hp_bar(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, enemy.hp as int, game.ENEMY_MAX_HP)
 
     for missile in game.missiles:
-        var col: Color = game.MISSILE_COLOR
-        if not missile.from_player:
-            col = game.ENEMY_MISSILE_COLOR
-        _draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, col)
+        var is_homing: bool = missile.get("homing", false) as bool
+        if not (missile.from_player as bool):
+            _draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, game.ENEMY_MISSILE_COLOR)
+        elif is_homing:
+            _draw_homing_missile(missile.pos as Vector2, missile.vel as Vector2)
+        else:
+            _draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, game.MISSILE_COLOR)
 
     _draw_explosions()
     _draw_debris()
@@ -82,6 +85,27 @@ func _draw_missile_triangle(center: Vector2, vel: Vector2, radius: float, color:
     var back_left := center - fwd * radius * 0.6 + right * radius * 0.4
     var back_right := center - fwd * radius * 0.6 - right * radius * 0.4
     draw_polygon(PackedVector2Array([tip, back_left, back_right]), PackedColorArray([color, color, color]))
+
+
+func _draw_homing_missile(center: Vector2, vel: Vector2) -> void:
+    var fwd: Vector2   = vel.normalized() if vel != Vector2.ZERO else Vector2.UP
+    var right: Vector2 = Vector2(-fwd.y, fwd.x)
+    var r: float       = game.MISSILE_RADIUS
+    var col: Color     = game.HOMING_COLOR
+
+    # Thin needle body
+    var tip: Vector2 = center + fwd  * r * 1.4
+    var bl:  Vector2 = center - fwd  * r * 0.9 + right * r * 0.25
+    var br:  Vector2 = center - fwd  * r * 0.9 - right * r * 0.25
+    draw_polygon(PackedVector2Array([tip, bl, br]), PackedColorArray([col, col, col]))
+
+    # Delta wing outline (larger triangle over rear half)
+    var wl: Vector2 = center - fwd * r * 0.1 + right * r * 1.1
+    var wr: Vector2 = center - fwd * r * 0.1 - right * r * 1.1
+    var wt: Vector2 = center + fwd * r * 0.4
+    draw_line(wt, wl, Color(col.r, col.g, col.b, 0.8), 1.2)
+    draw_line(wt, wr, Color(col.r, col.g, col.b, 0.8), 1.2)
+    draw_line(wl, wr, Color(col.r, col.g, col.b, 0.5), 1.2)
 
 
 func _draw_play_area_inner_border() -> void:

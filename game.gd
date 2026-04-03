@@ -65,6 +65,11 @@ const DEBRIS_HP_DAMAGE := 1
 const PLAYER_MAX_MISSILES := 10
 const PLAYER_FIRE_COOLDOWN := 4.0
 
+# ── Homing missile ───────────────────────────────────────────────────────────
+const PLAYER_MAX_HOMING      := 5
+const PLAYER_HOMING_COOLDOWN := 4.5
+const HOMING_TURN_RATE       := 1.2   # radians/sec steering correction
+
 const ENEMY_MAX_MISSILES := 6
 const ENEMY_FIRE_COOLDOWN := 3.5
 const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
@@ -112,6 +117,9 @@ var player_alive: bool = true
 var player_hp: int = PLAYER_MAX_HP
 var player_missiles_remaining: int = PLAYER_MAX_MISSILES
 var player_fire_cooldown: float = 0.0
+var player_homing_remaining: int   = PLAYER_MAX_HOMING
+var player_homing_cooldown:  float = 0.0
+var active_weapon: int = 0   # 0 = missile, 1 = homing, 2 = mine
 
 var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_cooldown}
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
@@ -188,6 +196,9 @@ func _reset_game() -> void:
     player_hp = PLAYER_MAX_HP
     player_missiles_remaining = PLAYER_MAX_MISSILES
     player_fire_cooldown = 0.0
+    player_homing_remaining = PLAYER_MAX_HOMING
+    player_homing_cooldown  = 0.0
+    active_weapon           = 0
 
     # Enemy setup — each slot maps to an archetype in ARCHETYPE_ROSTER
     enemies.clear()
@@ -265,6 +276,12 @@ func _unhandled_input(event: InputEvent) -> void:
             tractor_active = not tractor_active
             if not tractor_active:
                 tractor_target = -1
+        if event.keycode == KEY_1:
+            active_weapon = 0
+        elif event.keycode == KEY_2:
+            active_weapon = 1
+        elif event.keycode == KEY_3:
+            active_weapon = 2
 
     if phase != GamePhase.PLANNING:
         return
@@ -309,6 +326,8 @@ func _step_simulation(delta: float) -> void:
         # 1. Tick weapon cooldowns (before AI so should_fire sees updated cooldown)
         if player_fire_cooldown > 0.0:
             player_fire_cooldown = maxf(0.0, player_fire_cooldown - game_delta)
+        if player_homing_cooldown > 0.0:
+            player_homing_cooldown = maxf(0.0, player_homing_cooldown - game_delta)
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
@@ -350,10 +369,32 @@ func _step_simulation(delta: float) -> void:
                     var evade_impulse: Vector2 = evade_delta * float(enemy.mass) / maxf(game_delta, 0.001)
                     enemy.force_acc = (enemy.force_acc as Vector2) + evade_impulse
 
-        # 3. Tractor beam spring / tether (before integration so forces are included)
+        # 3. Homing missile steering
+        for missile in missiles:
+            if not (missile.get("homing", false) as bool):
+                continue
+            if not (missile.from_player as bool):
+                continue
+            var nearest_enemy: Dictionary = {}
+            var nearest_dist: float       = INF
+            for enemy in enemies:
+                if not enemy.alive:
+                    continue
+                var d: float = (missile.pos as Vector2).distance_to(enemy.pos as Vector2)
+                if d < nearest_dist:
+                    nearest_dist  = d
+                    nearest_enemy = enemy
+            if nearest_enemy.is_empty():
+                continue
+            var to_target: Vector2   = ((nearest_enemy.pos as Vector2) - (missile.pos as Vector2)).normalized()
+            var current_dir: Vector2 = (missile.vel as Vector2).normalized()
+            var new_dir: Vector2     = current_dir.lerp(to_target, HOMING_TURN_RATE * game_delta).normalized()
+            missile.vel              = new_dir * MISSILE_SPEED
+
+        # 4. Tractor beam spring / tether (before integration so forces are included)
         _step_tractor_beam(game_delta)
 
-        # 4. Physics integration (uses velocities set by AI dispatcher)
+        # 5. Physics integration (uses velocities set by AI dispatcher)
         _integrate_motion(game_delta)
         _handle_collisions()
         _step_explosions(game_delta)
@@ -645,21 +686,46 @@ func _try_fire_enemy(enemy: Dictionary) -> void:
 func _try_fire_player() -> void:
     if not player_alive:
         return
-    if player_missiles_remaining <= 0:
-        return
-    if player_fire_cooldown > 0.0:
-        return
+    match active_weapon:
+        0: _fire_missile()
+        1: _fire_homing()
+        2: _fire_mine()
 
-    var dir := player_vel.normalized()
-    var spawn_pos := player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
+
+func _fire_missile() -> void:
+    if player_missiles_remaining <= 0 or player_fire_cooldown > 0.0:
+        return
+    var dir: Vector2       = player_vel.normalized()
+    var spawn_pos: Vector2 = player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
     missiles.append({
-        "pos": spawn_pos,
-        "vel": dir * MISSILE_SPEED,
+        "pos":         spawn_pos,
+        "vel":         dir * MISSILE_SPEED,
         "from_player": true,
-        "power": MISSILE_POWER,
+        "power":       MISSILE_POWER,
+        "homing":      false,
     })
     player_missiles_remaining -= 1
-    player_fire_cooldown = PLAYER_FIRE_COOLDOWN
+    player_fire_cooldown       = PLAYER_FIRE_COOLDOWN
+
+
+func _fire_homing() -> void:
+    if player_homing_remaining <= 0 or player_homing_cooldown > 0.0:
+        return
+    var dir: Vector2       = player_vel.normalized()
+    var spawn_pos: Vector2 = player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
+    missiles.append({
+        "pos":         spawn_pos,
+        "vel":         dir * MISSILE_SPEED,
+        "from_player": true,
+        "power":       MISSILE_POWER,
+        "homing":      true,
+    })
+    player_homing_remaining -= 1
+    player_homing_cooldown   = PLAYER_HOMING_COOLDOWN
+
+
+func _fire_mine() -> void:
+    pass  # stub — implemented in Task 7
 
 
 func _update_fire_button_ui() -> void:
