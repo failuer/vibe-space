@@ -14,19 +14,27 @@ const PLAYER_RADIUS := 16.0
 const ENEMY_RADIUS := 16.0
 const MISSILE_RADIUS := 8.0
 
-const PLAYER_SPEED_DEFAULT := 140.0 # units per second
-const PLAYER_SPEED_MIN := 80.0
-const PLAYER_SPEED_MAX := 220.0
-const PLAYER_SPEED_DELTA := 80.0  # max speed change per turn (units/sec)
-const PLAYER_SPEED_STEP := 25.0
 const ENEMY_SPEED := 140.0
 const MISSILE_SPEED := 300.0
 const SCENE_RADIUS := 1000.0 # missiles/enemies beyond this are considered gone
-const MAX_TURN_RADIANS := PI / 2.0 # max turn per planning step (90 degrees)
 
-const PLAYER_COLOR := Color(0.3, 0.9, 1.0)
+# ── Physics ─────────────────────────────────────────────────────────────────
+const PLAYER_MASS             := 10.0   # tonnes
+const ENEMY_MASS              := 8.0    # tonnes
+const MAX_PLAYER_THRUST       := 1200.0 # force units — gives ~120 units/s² at base mass
+const MAX_ENEMY_THRUST        := 1000.0
+const GRAVITY_EMIT_MIN_MASS   := 6.0    # bodies below this mass don't emit gravity
+
+# ── Planning UI ──────────────────────────────────────────────────────────────
+# Mouse distance (world units) that maps to MAX_PLAYER_THRUST.
+const THRUST_ARROW_MAX_LEN    := 180.0
+
+const PLAYER_COLOR := Color(1.0, 1.0, 1.0)          # white
 const ENEMY_COLOR := Color(1.0, 0.4, 0.4)
-const MISSILE_COLOR := Color(1.0, 1.0, 0.4)
+const MISSILE_COLOR       := Color(1.0, 0.267, 0.267)   # red   #ff4444
+const HOMING_COLOR        := Color(0.412, 1.0,  0.490)   # lime  #69ff7d
+const MINE_COLOR          := Color(1.0, 0.667, 0.200)    # amber #ffaa33
+const SCRAP_COLOR         := Color(0.627, 0.659, 0.690)  # grey  #a0a8b0
 const ENEMY_MISSILE_COLOR := Color(1.0, 0.6, 0.2)
 const PLANNED_VECTOR_COLOR := Color(0.5, 1.0, 0.5)
 const STAR_COLOR := Color(0.85, 0.90, 1.0, 0.45)
@@ -64,13 +72,6 @@ const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
 const EVASION_DETECT_RADIUS := 80.0   # px — missile proximity triggering evasion
 const ARCHETYPE_ROSTER := ["aggressor", "orbiter", "flanker"]
 
-const PLAYER_TURN_RATE := MAX_TURN_RADIANS * 1.5 / SIM_DURATION # baseline sharper turns
-
-const ARROW_MIN_DIST := PLAYER_SPEED_MIN * SIM_DURATION
-const ARROW_MAX_DIST := PLAYER_SPEED_MAX * SIM_DURATION
-const ARROW_NEAR_HALF_WIDTH := 40.0
-const ARROW_FAR_HALF_WIDTH := 220.0
-
 const STAR_TILE_SIZE := Vector2(900.0, 700.0)
 const STAR_LAYER_COUNT := 3
 const STAR_COUNTS_BY_LAYER := [120, 90, 60]
@@ -89,22 +90,14 @@ var sim_time_left: float = 0.0
 var sim_real_elapsed: float = 0.0
 
 var player_pos: Vector2 = Vector2.ZERO
-var player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
-var player_speed: float = PLAYER_SPEED_DEFAULT
+var player_vel: Vector2 = Vector2.UP * 80.0    # initial drift velocity
+var player_mass: float = PLAYER_MASS
+var player_force_acc: Vector2 = Vector2.ZERO
+var planned_thrust: Vector2 = Vector2.ZERO     # set each planning phase
 var player_alive: bool = true
 var player_hp: int = PLAYER_MAX_HP
 var player_missiles_remaining: int = PLAYER_MAX_MISSILES
 var player_fire_cooldown: float = 0.0
-
-var turn_speed_min: float = PLAYER_SPEED_MIN
-var turn_speed_max: float = PLAYER_SPEED_MAX
-
-var planned_player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
-var planned_player_speed: float = PLAYER_SPEED_DEFAULT
-var planned_player_target_dir: Vector2 = Vector2.UP # kept for reference but no longer used for homing
-var planned_turn_angle: float = 0.0
-var current_turn_rate: float = 0.0 # radians/sec for active slice
-var turn_limit_this_turn: float = MAX_TURN_RADIANS
 
 var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_cooldown}
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
@@ -167,20 +160,14 @@ func _make_ai_state(archetype: String) -> Dictionary:
 func _reset_game() -> void:
     # Initial player setup
     player_pos = Vector2.ZERO
-    player_vel = Vector2.UP * PLAYER_SPEED_DEFAULT
-    player_speed = PLAYER_SPEED_DEFAULT
+    player_vel       = Vector2.UP * 80.0
+    player_mass      = PLAYER_MASS
+    player_force_acc = Vector2.ZERO
+    planned_thrust   = Vector2.ZERO
     player_alive = true
     player_hp = PLAYER_MAX_HP
     player_missiles_remaining = PLAYER_MAX_MISSILES
     player_fire_cooldown = 0.0
-    planned_player_vel = player_vel
-    planned_player_speed = player_speed
-    planned_player_target_dir = player_vel.normalized()
-    planned_turn_angle = 0.0
-    current_turn_rate = 0.0
-    turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
-    turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
-    turn_speed_max = player_speed + PLAYER_SPEED_DELTA
 
     # Enemy setup — each slot maps to an archetype in ARCHETYPE_ROSTER
     enemies.clear()
@@ -202,6 +189,8 @@ func _reset_game() -> void:
             "hp":                 ENEMY_MAX_HP,
             "archetype":          archetype,
             "ai_state":           _make_ai_state(archetype),
+            "mass":               ENEMY_MASS,       # ← new
+            "force_acc":          Vector2.ZERO,     # ← new
         })
 
     missiles.clear()
@@ -257,13 +246,7 @@ func _start_simulation() -> void:
     phase = GamePhase.SIMULATING
     sim_time_left = SIM_DURATION
     sim_real_elapsed = 0.0
-
-    # Commit planned movement intent for this turn (movement will curve at a constant rate over the whole slice)
-    planned_player_target_dir = planned_player_vel.normalized()
-    player_speed = planned_player_speed
-    current_turn_rate = 0.0
-    if SIM_DURATION > 0.0:
-        current_turn_rate = planned_turn_angle / SIM_DURATION
+    # planned_thrust was set by _update_planned_vector during planning phase — nothing to commit
 
 
 
@@ -302,8 +285,12 @@ func _step_simulation(delta: float) -> void:
                     continue
                 var ai := _get_ai(enemy.archetype)
 
-                # Steering sets velocity for this frame
-                enemy.vel = ai.steer(enemy, self, game_delta)
+                # Steering — AI returns desired velocity; we convert to thrust
+                var desired_vel: Vector2 = ai.steer(enemy, self, game_delta)
+                var vel_error: Vector2   = desired_vel - (enemy.vel as Vector2)
+                var raw_thrust: Vector2  = vel_error * float(enemy.mass) / maxf(game_delta, 0.001)
+                var thrust: Vector2      = raw_thrust.clamped(MAX_ENEMY_THRUST)
+                enemy.force_acc = (enemy.force_acc as Vector2) + thrust
 
                 # Firing — archetype decides intent; _try_fire_enemy checks cooldown/ammo
                 if ai.should_fire(enemy, self):
@@ -338,30 +325,67 @@ func _step_simulation(delta: float) -> void:
 
     if sim_time_left <= 0.0 and phase == GamePhase.SIMULATING:
         phase = GamePhase.PLANNING
-        # Default next planned movement to "no new input"
-        if player_alive:
-            planned_player_vel = player_vel
-            planned_player_speed = player_speed
-            turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
-            turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
-            turn_speed_max = player_speed + PLAYER_SPEED_DELTA
+        # player_vel naturally carries over — no momentum re-initialisation needed
 
 
 func _integrate_motion(delta: float) -> void:
-    if player_alive:
-        # Rotate at a constant rate for this slice, using the committed speed.
-        var angle_step := current_turn_rate * delta
-        if angle_step != 0.0:
-            player_vel = player_vel.rotated(angle_step)
-        player_vel = player_vel.normalized() * player_speed
-        player_pos += player_vel * delta
-
+    # ── Gravity accumulation ──────────────────────────────────────────────────
+    # Build list of gravity-emitting bodies for pairwise calculation.
+    # Only bodies above GRAVITY_EMIT_MIN_MASS emit; all bodies receive.
+    var emitters: Array = []
+    if player_alive and player_mass >= GRAVITY_EMIT_MIN_MASS:
+        emitters.append({
+            "pos_ref":  "player",
+            "pos":      player_pos,
+            "mass":     player_mass,
+        })
     for enemy in enemies:
-        if enemy.alive:
-            enemy.pos += enemy.vel * delta
+        if enemy.alive and float(enemy.mass) >= GRAVITY_EMIT_MIN_MASS:
+            emitters.append({
+                "pos_ref": "enemy",
+                "enemy":   enemy,
+                "pos":     enemy.pos as Vector2,
+                "mass":    float(enemy.mass),
+            })
 
+    # Apply gravity: each emitter attracts all other bodies
+    for emitter in emitters:
+        var ep: Vector2 = emitter.pos as Vector2
+        var em: float   = emitter.mass as float
+
+        # → player
+        if player_alive and emitter.get("pos_ref") != "player":
+            player_force_acc += PhysicsSim.gravity_force(ep, em, player_pos, player_mass)
+
+        # → enemies
+        for enemy in enemies:
+            if not enemy.alive:
+                continue
+            if emitter.get("pos_ref") == "enemy" and emitter.get("enemy") == enemy:
+                continue  # skip self
+            var gf: Vector2 = PhysicsSim.gravity_force(ep, em, enemy.pos as Vector2, float(enemy.mass))
+            enemy.force_acc = (enemy.force_acc as Vector2) + gf
+
+    # ── Player integration ────────────────────────────────────────────────────
+    if player_alive:
+        player_force_acc += planned_thrust
+        var accel: Vector2 = player_force_acc / player_mass
+        player_vel    += accel * delta
+        player_pos    += player_vel * delta
+        player_force_acc = Vector2.ZERO
+
+    # ── Enemy integration ─────────────────────────────────────────────────────
+    for enemy in enemies:
+        if not enemy.alive:
+            continue
+        var accel: Vector2 = (enemy.force_acc as Vector2) / float(enemy.mass)
+        enemy.vel       = (enemy.vel as Vector2) + accel * delta
+        enemy.pos       = (enemy.pos as Vector2) + (enemy.vel as Vector2) * delta
+        enemy.force_acc = Vector2.ZERO
+
+    # ── Missiles (no mass — just kinematic) ───────────────────────────────────
     for missile in missiles:
-        missile.pos += missile.vel * delta
+        missile.pos = (missile.pos as Vector2) + (missile.vel as Vector2) * delta
 
 
 func _handle_collisions() -> void:
@@ -548,48 +572,13 @@ func _update_fire_button_ui() -> void:
 func _update_planned_vector(mouse_world: Vector2) -> void:
     if not player_alive:
         return
-
-    var fwd := player_vel.normalized()
-    var right := fwd.rotated(PI * 0.5)
-
-    var raw := mouse_world - player_pos
-    if raw == Vector2.ZERO:
-        raw = fwd
-
-    # Decompose mouse offset into the ship's local (forward, right) frame.
-    var mx: float = raw.dot(fwd)
-    var my: float = raw.dot(right)
-
-    # Exact inversion of _arc_endpoint: the chord from start to arc endpoint points at θ/2
-    # from the forward direction, so the required turn angle is twice the chord angle.
-    var angle_raw := 2.0 * atan2(my, mx)
-    var angle_clamped: float = clamp(angle_raw, -turn_limit_this_turn, turn_limit_this_turn)
-
-    # After clamping, project the mouse onto the (possibly adjusted) chord direction
-    # to get the chord length, then convert to arc length (= speed * SIM_DURATION).
-    var chord_dir := fwd.rotated(angle_clamped * 0.5)
-    var chord_len := maxf(0.0, raw.dot(chord_dir))
-    var half_angle: float = angle_clamped * 0.5
-    var arc_len: float = chord_len if abs(half_angle) < 1e-4 else chord_len * half_angle / sin(half_angle)
-
-    planned_player_speed = clamp(arc_len / SIM_DURATION, turn_speed_min, turn_speed_max)
-    planned_turn_angle = angle_clamped
-    planned_player_vel = fwd.rotated(angle_clamped) * planned_player_speed
-
-
-# Returns the actual endpoint of a circular-arc move: constant speed v, constant turn rate,
-# total heading change = turn_angle over SIM_DURATION. This is the single source of truth
-# for where any planned (speed, angle) combination lands — used by both the wedge and ghost.
-func _arc_endpoint(start: Vector2, facing: Vector2, speed: float, turn_angle: float) -> Vector2:
-    var fwd := facing.normalized()
-    var T := SIM_DURATION
-    if abs(turn_angle) < 1e-4:
-        return start + fwd * speed * T
-    var vT := speed * T
-    var right := fwd.rotated(PI * 0.5)
-    var x := vT * sin(turn_angle) / turn_angle
-    var y := vT * (1.0 - cos(turn_angle)) / turn_angle
-    return start + fwd * x + right * y
+    var offset: Vector2 = mouse_world - player_pos
+    var raw_len: float  = offset.length()
+    if raw_len < 1.0:
+        planned_thrust = Vector2.ZERO
+        return
+    var ratio: float   = minf(raw_len, THRUST_ARROW_MAX_LEN) / THRUST_ARROW_MAX_LEN
+    planned_thrust     = offset.normalized() * ratio * MAX_PLAYER_THRUST
 
 
 func _spawn_explosion(pos: Vector2, vel: Vector2, is_ship: bool) -> void:
@@ -705,8 +694,3 @@ func _is_inside_play_area(p: Vector2) -> bool:
     return _play_area_rect().has_point(p)
 
 
-func _compute_turn_limit_for_speed(speed: float) -> float:
-    if speed == 0.0:
-        return MAX_TURN_RADIANS
-    var speed_factor: float = clamp(PLAYER_SPEED_DEFAULT / speed, 0.5, 2.0)
-    return MAX_TURN_RADIANS * speed_factor
