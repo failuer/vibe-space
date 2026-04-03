@@ -28,6 +28,7 @@ func _draw() -> void:
 
     _draw_explosions()
     _draw_debris()
+    _draw_scrap()
 
     if game.phase == Game.GamePhase.PLANNING and game.player_alive:
         _draw_thrust_arrow()
@@ -258,6 +259,31 @@ func _draw_explosions() -> void:
         var ring_color := Color(1.0, 0.5, 0.1, alpha) if is_ship else Color(1.0, 0.9, 0.3, alpha)
         if current_r > 1.0:
             draw_arc(explosion.pos as Vector2, current_r, 0.0, TAU, 32, ring_color, 2.5)
+
+
+func _draw_scrap() -> void:
+    for piece in game.scrap:
+        var pos: Vector2   = piece.pos as Vector2
+        var angle: float   = float(piece.angle)
+        var mass: float    = float(piece.mass)
+        # Size scales with mass: 1t → r≈7.7, 3t → r≈11.1
+        var r: float       = 6.0 + mass * 1.7
+        var col: Color     = game.SCRAP_COLOR
+
+        # Irregular hexagon — 6 verts with slight radius variation
+        var verts: PackedVector2Array = PackedVector2Array()
+        var offsets: Array = [0.9, 1.1, 0.8, 1.0, 1.15, 0.85]
+        for i: int in 6:
+            var a: float = angle + float(i) * TAU / 6.0
+            verts.append(pos + Vector2(cos(a), sin(a)) * r * float(offsets[i]))
+        var cols: PackedColorArray = PackedColorArray()
+        cols.resize(6)
+        cols.fill(col)
+        draw_polygon(verts, cols)
+
+        # Outline
+        for i: int in 6:
+            draw_line(verts[i], verts[(i + 1) % 6], Color(col.r, col.g, col.b, 0.5), 1.0)
 
 
 func _draw_debris() -> void:

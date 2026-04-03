@@ -72,6 +72,13 @@ const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
 const EVASION_DETECT_RADIUS := 80.0   # px — missile proximity triggering evasion
 const ARCHETYPE_ROSTER := ["aggressor", "orbiter", "flanker"]
 
+# ── Scrap ────────────────────────────────────────────────────────────────────
+const SCRAP_RADIUS         := 10.0
+const SCRAP_MASS_MIN       := 1.0   # tonnes
+const SCRAP_MASS_MAX       := 3.0
+const SCRAP_SPAWN_COUNT    := 3     # pieces placed at game start
+const SCRAP_FROM_EXPLOSION := 2     # pieces per destroyed enemy ship
+
 const STAR_TILE_SIZE := Vector2(900.0, 700.0)
 const STAR_LAYER_COUNT := 3
 const STAR_COUNTS_BY_LAYER := [120, 90, 60]
@@ -103,6 +110,7 @@ var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_coold
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
 var explosions: Array = []  # each: {pos, vel, lifetime, max_lifetime, radius, is_ship}
 var debris: Array = []  # each: {pos, vel, angle, angular_vel, lifetime, max_lifetime, size, hp_dealt: bool}
+var scrap: Array = []  # each: {pos, vel, mass, force_acc, angle, angular_vel}
 
 var end_state: StringName = ""
 var end_timer: float = 0.0
@@ -196,6 +204,13 @@ func _reset_game() -> void:
     missiles.clear()
     explosions.clear()
     debris.clear()
+    scrap.clear()
+    for _i in SCRAP_SPAWN_COUNT:
+        var angle: float  = randf() * TAU
+        var dist: float   = randf_range(200.0, 500.0)
+        var spawn_pos: Vector2 = Vector2(cos(angle), sin(angle)) * dist
+        var drift_vel: Vector2 = Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0))
+        _spawn_scrap_piece(spawn_pos, drift_vel)
 
     phase = GamePhase.PLANNING
     sim_time_left = 0.0
@@ -368,6 +383,11 @@ func _integrate_motion(delta: float) -> void:
             var gf: Vector2 = PhysicsSim.gravity_force(ep, em, enemy.pos as Vector2, float(enemy.mass))
             enemy.force_acc = (enemy.force_acc as Vector2) + gf
 
+        # → scrap (receives gravity, does not emit)
+        for piece in scrap:
+            var gf: Vector2 = PhysicsSim.gravity_force(ep, em, piece.pos as Vector2, float(piece.mass))
+            piece.force_acc = (piece.force_acc as Vector2) + gf
+
     # ── Player integration ────────────────────────────────────────────────────
     if player_alive:
         player_force_acc += planned_thrust
@@ -388,6 +408,14 @@ func _integrate_motion(delta: float) -> void:
     # ── Missiles (no mass — just kinematic) ───────────────────────────────────
     for missile in missiles:
         missile.pos = (missile.pos as Vector2) + (missile.vel as Vector2) * delta
+
+    # ── Scrap integration ─────────────────────────────────────────────────────
+    for piece in scrap:
+        var accel: Vector2 = (piece.force_acc as Vector2) / float(piece.mass)
+        piece.vel       = (piece.vel as Vector2) + accel * delta
+        piece.pos       = (piece.pos as Vector2) + (piece.vel as Vector2) * delta
+        piece.angle     = float(piece.angle) + float(piece.angular_vel) * delta
+        piece.force_acc = Vector2.ZERO
 
 
 func _handle_collisions() -> void:
@@ -444,6 +472,12 @@ func _cull_offscreen_objects() -> void:
     for enemy in enemies:
         if enemy.alive and enemy.pos.length() > SCENE_RADIUS:
             enemy.alive = false
+
+    var live_scrap: Array = []
+    for piece in scrap:
+        if (piece.pos as Vector2).length() <= SCENE_RADIUS:
+            live_scrap.append(piece)
+    scrap = live_scrap
 
 
 func _check_leave_play_area() -> void:
@@ -583,6 +617,17 @@ func _update_planned_vector(mouse_world: Vector2) -> void:
     planned_thrust     = offset.normalized() * ratio * MAX_PLAYER_THRUST
 
 
+func _spawn_scrap_piece(pos: Vector2, vel: Vector2) -> void:
+    scrap.append({
+        "pos":         pos,
+        "vel":         vel,
+        "mass":        randf_range(SCRAP_MASS_MIN, SCRAP_MASS_MAX),
+        "force_acc":   Vector2.ZERO,
+        "angle":       randf() * TAU,
+        "angular_vel": randf_range(-1.5, 1.5),
+    })
+
+
 func _spawn_explosion(pos: Vector2, vel: Vector2, is_ship: bool) -> void:
     var max_r := EXPLOSION_MAX_RADIUS_SHIP if is_ship else EXPLOSION_MAX_RADIUS_MISSILE
     explosions.append({
@@ -609,6 +654,13 @@ func _spawn_explosion(pos: Vector2, vel: Vector2, is_ship: bool) -> void:
             "size": size,
             "hp_dealt": false,
         })
+
+    if is_ship:
+        for _i in SCRAP_FROM_EXPLOSION:
+            var scatter_angle: float = randf() * TAU
+            var speed: float = randf_range(40.0, 120.0)
+            var scatter_vel: Vector2 = vel + Vector2(cos(scatter_angle), sin(scatter_angle)) * speed
+            _spawn_scrap_piece(pos + Vector2(cos(scatter_angle), sin(scatter_angle)) * 20.0, scatter_vel)
 
     var blast_r := EXPLOSION_BLAST_RADIUS_SHIP if is_ship else EXPLOSION_BLAST_RADIUS_MISSILE
     _apply_blast_impulse(pos, blast_r)
