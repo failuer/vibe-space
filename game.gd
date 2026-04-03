@@ -417,9 +417,7 @@ func _unhandled_input(event: InputEvent) -> void:
         if event.keycode == KEY_SPACE:
             _try_fire_player()
         if event.keycode == KEY_T:
-            tractor_active = not tractor_active
-            if not tractor_active:
-                tractor_target = -1
+            _on_tractor_pressed()
         if event.keycode == KEY_1:
             active_weapon = 0
         elif event.keycode == KEY_2:
