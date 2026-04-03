@@ -485,7 +485,7 @@ func _step_simulation(delta: float) -> void:
                 var desired_vel: Vector2 = ai.steer(enemy, self, game_delta)
                 var vel_error: Vector2   = desired_vel - (enemy.vel as Vector2)
                 var raw_thrust: Vector2  = vel_error * float(enemy.mass) / maxf(game_delta, 0.001)
-                var thrust: Vector2      = raw_thrust.clamped(MAX_ENEMY_THRUST)
+                var thrust: Vector2      = raw_thrust.limit_length(MAX_ENEMY_THRUST)
                 enemy.force_acc = (enemy.force_acc as Vector2) + thrust
 
                 # Firing — archetype decides intent; _try_fire_enemy checks cooldown/ammo
