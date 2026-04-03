@@ -39,6 +39,9 @@ func _draw() -> void:
         _draw_thrust_arrow()
         _draw_thrust_preview()
 
+    if game.player_alive:
+        _draw_hud_hp()
+
 
 func _draw_hp_bar(center: Vector2, vel: Vector2, radius: float, current_hp: int, max_hp: int) -> void:
     var fwd := vel.normalized() if vel != Vector2.ZERO else Vector2.UP
@@ -384,3 +387,27 @@ func _draw_debris() -> void:
         var p1 := pos + Vector2(cos(angle + TAU * 0.333), sin(angle + TAU * 0.333)) * size
         var p2 := pos + Vector2(cos(angle + TAU * 0.667), sin(angle + TAU * 0.667)) * size
         draw_polygon(PackedVector2Array([p0, p1, p2]), PackedColorArray([color, color, color]))
+
+
+func _draw_hud_hp() -> void:
+    var pip_size: float = 11.0
+    var pip_gap:  float = 3.0
+    # Top-left in world space: player_pos - half viewport
+    var world_origin: Vector2 = game.player_pos - get_viewport_rect().size * 0.5 + Vector2(14.0, 14.0)
+
+    for i: int in game.PLAYER_MAX_HP:
+        var cx: float = world_origin.x + float(i) * (pip_size + pip_gap) + pip_size * 0.5
+        var cy: float = world_origin.y + pip_size * 0.5
+        var filled: bool = i < game.player_hp
+        if filled:
+            var pts: PackedVector2Array = PackedVector2Array([
+                Vector2(cx - pip_size * 0.5, cy - pip_size * 0.5),
+                Vector2(cx + pip_size * 0.5, cy - pip_size * 0.5),
+                Vector2(cx + pip_size * 0.5, cy + pip_size * 0.5),
+                Vector2(cx - pip_size * 0.5, cy + pip_size * 0.5),
+            ])
+            draw_polygon(pts, PackedColorArray([game.PLAYER_COLOR, game.PLAYER_COLOR,
+                                                game.PLAYER_COLOR, game.PLAYER_COLOR]))
+        else:
+            draw_rect(Rect2(cx - pip_size * 0.5, cy - pip_size * 0.5, pip_size, pip_size),
+                      Color(1.0, 1.0, 1.0, 0.15), false, 1.0)

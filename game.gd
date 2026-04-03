@@ -108,9 +108,14 @@ const STAR_RADIUS_BY_LAYER := [1.5, 1.2, 1.0]
 @onready var camera: Camera2D = $Camera2D
 @onready var message_label: Label = $CanvasLayer/MessageLabel
 @onready var restart_button: Button = $CanvasLayer/RestartButton
-@onready var fire_button: Button = $CanvasLayer/FireButtonContainer/FireButton
-@onready var cooldown_fill: ColorRect = $CanvasLayer/FireButtonContainer/FireButton/CooldownFill
-@onready var ammo_display: Control = $CanvasLayer/FireButtonContainer/AmmoDisplay
+
+var slot_buttons:   Array[Button]    = []
+var slot_cooldowns: Array[ColorRect] = []
+var tractor_button: Button
+var mass_label:     Label
+var cargo_label:    Label
+var cargo_bar:      ColorRect
+var cargo_bar_bg:   ColorRect
 
 var phase: GamePhase = GamePhase.PLANNING
 var sim_time_left: float = 0.0
@@ -153,30 +158,154 @@ var _stars_by_layer: Array = [] # each layer: Array[Vector2] positions inside ST
 func _ready() -> void:
     randomize()
     _generate_stars()
+    # Remove old fire button container if it still exists in the scene
+    var old_container: Node = $CanvasLayer.get_node_or_null("FireButtonContainer")
+    if old_container:
+        old_container.queue_free()
     _reset_game()
     restart_button.pressed.connect(_on_restart_pressed)
-    fire_button.pressed.connect(_try_fire_player)
+    _build_hud()
 
-    var style := StyleBoxFlat.new()
-    style.bg_color = Color(0, 0, 0, 0)
-    style.border_width_left = 2
-    style.border_width_right = 2
-    style.border_width_top = 2
-    style.border_width_bottom = 2
-    style.border_color = Color(0.3, 0.91, 1.0, 1.0)
-    style.corner_radius_top_left = 22
-    style.corner_radius_top_right = 22
-    style.corner_radius_bottom_left = 22
-    style.corner_radius_bottom_right = 22
-    fire_button.add_theme_stylebox_override("normal", style)
-    fire_button.add_theme_stylebox_override("hover", style)
-    fire_button.add_theme_stylebox_override("pressed", style)
-    fire_button.add_theme_stylebox_override("disabled", style)
-    fire_button.add_theme_color_override("font_color", Color(0.3, 0.91, 1.0))
-    fire_button.add_theme_color_override("font_disabled_color", Color(0.3, 0.91, 1.0, 0.3))
+func _build_hud() -> void:
+    var canvas: CanvasLayer = $CanvasLayer
 
-    ammo_display.missiles_max = PLAYER_MAX_MISSILES
-    ammo_display.missiles_remaining = player_missiles_remaining
+    var weapon_colors: Array[Color] = [MISSILE_COLOR, HOMING_COLOR, MINE_COLOR]
+    var weapon_names: Array[String]  = ["MISSILE", "HOMING", "MINE"]
+
+    # ── Bottom-center: weapon slots ───────────────────────────────────────────
+    var slot_container: HBoxContainer = HBoxContainer.new()
+    slot_container.add_theme_constant_override("separation", 8)
+    slot_container.anchor_top    = 1.0
+    slot_container.anchor_bottom = 1.0
+    slot_container.anchor_left   = 0.5
+    slot_container.anchor_right  = 0.5
+    slot_container.offset_top    = -86.0
+    slot_container.offset_bottom = -14.0
+    slot_container.offset_left   = -120.0
+    slot_container.offset_right  = 120.0
+    canvas.add_child(slot_container)
+
+    for i: int in 3:
+        var col: Color = weapon_colors[i]
+        var vbox: VBoxContainer = VBoxContainer.new()
+        vbox.add_theme_constant_override("separation", 3)
+        slot_container.add_child(vbox)
+
+        var hotkey_lbl: Label = Label.new()
+        hotkey_lbl.text = "[%d]" % (i + 1)
+        hotkey_lbl.add_theme_font_size_override("font_size", 9)
+        hotkey_lbl.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
+        hotkey_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        vbox.add_child(hotkey_lbl)
+
+        var btn: Button = Button.new()
+        btn.text = weapon_names[i]
+        btn.custom_minimum_size = Vector2(72, 52)
+        btn.pressed.connect(Callable(self, "_on_slot_pressed").bind(i))
+        var sty: StyleBoxFlat = StyleBoxFlat.new()
+        sty.bg_color = Color(0, 0, 0, 0)
+        sty.border_width_left   = 2
+        sty.border_width_right  = 2
+        sty.border_width_top    = 2
+        sty.border_width_bottom = 2
+        sty.border_color = col
+        sty.corner_radius_top_left     = 8
+        sty.corner_radius_top_right    = 8
+        sty.corner_radius_bottom_left  = 8
+        sty.corner_radius_bottom_right = 8
+        btn.add_theme_stylebox_override("normal",   sty)
+        btn.add_theme_stylebox_override("hover",    sty)
+        btn.add_theme_stylebox_override("pressed",  sty)
+        btn.add_theme_stylebox_override("disabled", sty)
+        btn.add_theme_color_override("font_color",          col)
+        btn.add_theme_color_override("font_disabled_color", Color(col.r, col.g, col.b, 0.3))
+        btn.add_theme_font_size_override("font_size", 9)
+        vbox.add_child(btn)
+        slot_buttons.append(btn)
+
+        var cd_fill: ColorRect = ColorRect.new()
+        cd_fill.color = col
+        cd_fill.custom_minimum_size = Vector2(0, 3)
+        cd_fill.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+        btn.add_child(cd_fill)
+        slot_cooldowns.append(cd_fill)
+
+    # ── Top-center: tractor toggle ────────────────────────────────────────────
+    tractor_button = Button.new()
+    tractor_button.text = "TRACTOR"
+    tractor_button.anchor_left   = 0.5
+    tractor_button.anchor_right  = 0.5
+    tractor_button.anchor_top    = 0.0
+    tractor_button.anchor_bottom = 0.0
+    tractor_button.offset_left   = -55.0
+    tractor_button.offset_right  = 55.0
+    tractor_button.offset_top    = 12.0
+    tractor_button.offset_bottom = 36.0
+    tractor_button.pressed.connect(_on_tractor_pressed)
+    var tst: StyleBoxFlat = StyleBoxFlat.new()
+    tst.bg_color = Color(0.961, 0.773, 0.259, 0.1)
+    tst.border_width_left   = 2
+    tst.border_width_right  = 2
+    tst.border_width_top    = 2
+    tst.border_width_bottom = 2
+    tst.border_color = Color(0.961, 0.773, 0.259)
+    tst.corner_radius_top_left     = 12
+    tst.corner_radius_top_right    = 12
+    tst.corner_radius_bottom_left  = 12
+    tst.corner_radius_bottom_right = 12
+    tractor_button.add_theme_stylebox_override("normal",  tst)
+    tractor_button.add_theme_stylebox_override("hover",   tst)
+    tractor_button.add_theme_stylebox_override("pressed", tst)
+    tractor_button.add_theme_color_override("font_color", Color(0.961, 0.773, 0.259))
+    tractor_button.add_theme_font_size_override("font_size", 9)
+    canvas.add_child(tractor_button)
+
+    # ── Top-right: mass + cargo cluster ──────────────────────────────────────
+    var tr_vbox: VBoxContainer = VBoxContainer.new()
+    tr_vbox.anchor_left   = 1.0
+    tr_vbox.anchor_right  = 1.0
+    tr_vbox.anchor_top    = 0.0
+    tr_vbox.anchor_bottom = 0.0
+    tr_vbox.offset_left   = -110.0
+    tr_vbox.offset_right  = -12.0
+    tr_vbox.offset_top    = 12.0
+    tr_vbox.offset_bottom = 60.0
+    tr_vbox.alignment     = BoxContainer.ALIGNMENT_END
+    canvas.add_child(tr_vbox)
+
+    mass_label = Label.new()
+    mass_label.add_theme_font_size_override("font_size", 14)
+    mass_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+    mass_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    tr_vbox.add_child(mass_label)
+
+    cargo_bar_bg = ColorRect.new()
+    cargo_bar_bg.color               = Color(1, 1, 1, 0.07)
+    cargo_bar_bg.custom_minimum_size = Vector2(88, 4)
+    tr_vbox.add_child(cargo_bar_bg)
+
+    cargo_bar = ColorRect.new()
+    cargo_bar.color = Color(0.961, 0.773, 0.259)
+    cargo_bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+    cargo_bar.anchor_right = 0.0
+    cargo_bar_bg.add_child(cargo_bar)
+
+    cargo_label = Label.new()
+    cargo_label.add_theme_font_size_override("font_size", 9)
+    cargo_label.add_theme_color_override("font_color", Color(0.961, 0.773, 0.259, 0.7))
+    cargo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    tr_vbox.add_child(cargo_label)
+
+
+func _on_slot_pressed(slot: int) -> void:
+    active_weapon = slot
+
+
+func _on_tractor_pressed() -> void:
+    tractor_active = not tractor_active
+    if not tractor_active:
+        tractor_target = -1
+
 
 func _generate_stars() -> void:
     _stars_by_layer.clear()
@@ -266,7 +395,7 @@ func _reset_game() -> void:
     if is_node_ready():
         $Renderer.queue_redraw()
     if is_node_ready():
-        _update_fire_button_ui()
+        _update_hud()
 
 
 func _process(delta: float) -> void:
@@ -277,7 +406,7 @@ func _process(delta: float) -> void:
 
     camera.position = player_pos
     $Renderer.queue_redraw()
-    _update_fire_button_ui()
+    _update_hud()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -686,13 +815,16 @@ func _step_end_timer(delta: float) -> void:
 
 func _show_end_ui() -> void:
     if end_state == "victory":
-        message_label.text = "Victory!"
+        var total_scrap: float = player_cargo_aboard
+        # Count any tethered over-capacity scrap
+        if tractor_active and tractor_target >= 0 and tractor_target < scrap.size():
+            total_scrap += float(scrap[tractor_target].mass)
+        message_label.text = "Victory!\nScrap collected: %.0f t" % total_scrap
     elif end_state == "defeat":
         message_label.text = "Defeat!"
     else:
         message_label.text = ""
-
-    message_label.visible = true
+    message_label.visible  = true
     restart_button.visible = true
 
 
@@ -832,31 +964,52 @@ func _step_mines(delta: float) -> void:
     mines = live_mines
 
 
-func _update_fire_button_ui() -> void:
-    var fire_ready := player_fire_cooldown <= 0.0 and player_missiles_remaining > 0 and phase != GamePhase.ENDED
+func _update_hud() -> void:
+    if slot_buttons.is_empty():
+        return
 
-    fire_button.disabled = not fire_ready
+    var ammo_counts: Array[int]   = [player_missiles_remaining, player_homing_remaining, player_mine_remaining]
+    var cooldowns:   Array[float] = [player_fire_cooldown, player_homing_cooldown, player_mine_cooldown]
+    var cd_maxes:    Array[float] = [PLAYER_FIRE_COOLDOWN, PLAYER_HOMING_COOLDOWN, PLAYER_MINE_COOLDOWN]
 
-    if player_missiles_remaining <= 0:
-        fire_button.text = "NO AMMO"
-    elif player_fire_cooldown > 0.0:
-        fire_button.text = "RELOADING..."
-    else:
-        fire_button.text = "FIRE"
+    for i: int in 3:
+        var btn:  Button    = slot_buttons[i]
+        var fill: ColorRect = slot_cooldowns[i]
+        var is_active: bool = active_weapon == i
+        btn.disabled = phase == GamePhase.ENDED or not player_alive
 
-    # Cooldown fill sweeps left-to-right as cooldown expires (0 = just fired, full = ready)
-    var fill_ratio := 1.0 - clampf(player_fire_cooldown / PLAYER_FIRE_COOLDOWN, 0.0, 1.0)
-    cooldown_fill.size.x = fire_button.size.x * fill_ratio
+        # Highlight active slot
+        var sty: StyleBoxFlat = btn.get_theme_stylebox("normal") as StyleBoxFlat
+        if sty:
+            sty.bg_color = Color(0.05, 0.05, 0.05, 0.5) if is_active else Color(0, 0, 0, 0)
 
-    # Fade border to 25% opacity when out of ammo
-    var border_alpha := 0.25 if player_missiles_remaining <= 0 else 1.0
-    var s := fire_button.get_theme_stylebox("normal") as StyleBoxFlat
-    if s:
-        s.border_color = Color(0.3, 0.91, 1.0, border_alpha)
+        # Cooldown fill
+        var cd_ratio: float = 1.0 - clampf(cooldowns[i] / cd_maxes[i], 0.0, 1.0)
+        fill.size.x = btn.size.x * cd_ratio
 
-    # Ammo dots
-    ammo_display.missiles_remaining = player_missiles_remaining
-    ammo_display.queue_redraw()
+        # Label
+        if ammo_counts[i] <= 0:
+            btn.text = "EMPTY"
+        elif cooldowns[i] > 0.0:
+            btn.text = "..."
+        else:
+            btn.text = "%s ×%d" % [["MSL", "HMG", "MNE"][i], ammo_counts[i]]
+
+    # Tractor button
+    if tractor_button:
+        var tst: StyleBoxFlat = tractor_button.get_theme_stylebox("normal") as StyleBoxFlat
+        if tst:
+            tst.bg_color = Color(0.961, 0.773, 0.259, 0.15 if tractor_active else 0.0)
+        tractor_button.text = "TRACTOR ●" if tractor_active else "TRACTOR"
+
+    # Mass + cargo
+    if mass_label:
+        mass_label.text = "MASS  %.0f t" % player_mass
+    if cargo_label:
+        cargo_label.text = "CARGO %.0f / %.0f t" % [player_cargo_aboard, PLAYER_CARGO_CAP]
+    if cargo_bar and cargo_bar_bg:
+        var fill_ratio: float = clampf(player_cargo_aboard / PLAYER_CARGO_CAP, 0.0, 1.0)
+        cargo_bar.size.x = cargo_bar_bg.size.x * fill_ratio
 
 
 func _update_planned_vector(mouse_world: Vector2) -> void:
