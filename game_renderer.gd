@@ -322,15 +322,12 @@ func _draw_tractor_beam() -> void:
     var gold: Color = Color(0.961, 0.773, 0.259)  # #f5c542
     var red: Color  = Color(1.0, 0.267, 0.267, 0.8)
 
-    if game.tractor_target == -1:
+    if game.tractor_target.is_empty():
         # Searching — draw a pulsing circle stub
         draw_circle(game.player_pos, 6.0, Color(gold.r, gold.g, gold.b, 0.4))
         return
 
-    if game.tractor_target >= game.scrap.size():
-        return
-
-    var piece: Dictionary  = game.scrap[game.tractor_target]
+    var piece: Dictionary  = game.tractor_target
     var ppos: Vector2      = piece.pos as Vector2
     var remaining_cap: float = game.PLAYER_CARGO_CAP - game.player_cargo_aboard
     var fits: bool           = float(piece.mass) <= remaining_cap + 0.01

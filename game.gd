@@ -36,9 +36,7 @@ const HOMING_COLOR        := Color(0.412, 1.0,  0.490)   # lime  #69ff7d
 const MINE_COLOR          := Color(1.0, 0.667, 0.200)    # amber #ffaa33
 const SCRAP_COLOR         := Color(0.627, 0.659, 0.690)  # grey  #a0a8b0
 const ENEMY_MISSILE_COLOR := Color(1.0, 0.6, 0.2)
-const PLANNED_VECTOR_COLOR := Color(0.5, 1.0, 0.5)
 const STAR_COLOR := Color(0.85, 0.90, 1.0, 0.45)
-const BORDER_COLOR := Color(1.0, 0.0, 0.0, 0.1)
 
 const PLAY_AREA_HALF_EXTENTS := Vector2(975.0, 675.0) # 50% larger
 const PLAY_BORDER_THICKNESS := 80.0
@@ -146,7 +144,7 @@ var scrap: Array = []  # each: {pos, vel, mass, force_acc, angle, angular_vel}
 
 # ── Tractor beam state ────────────────────────────────────────────────────────
 var tractor_active: bool       = false
-var tractor_target: int        = -1    # index into scrap[], -1 = no target
+var tractor_target: Dictionary = {}    # the scrap piece dict being tractored; empty = no target
 var player_cargo_aboard: float = 0.0
 
 var end_state: StringName = ""
@@ -304,7 +302,7 @@ func _on_slot_pressed(slot: int) -> void:
 func _on_tractor_pressed() -> void:
     tractor_active = not tractor_active
     if not tractor_active:
-        tractor_target = -1
+        tractor_target = {}
 
 
 func _generate_stars() -> void:
@@ -380,7 +378,7 @@ func _reset_game() -> void:
         _spawn_scrap_piece(spawn_pos, drift_vel)
 
     tractor_active      = false
-    tractor_target      = -1
+    tractor_target      = {}
     player_cargo_aboard = 0.0
 
     phase = GamePhase.PLANNING
@@ -558,23 +556,23 @@ func _step_tractor_beam(delta: float) -> void:
     if not tractor_active or not player_alive:
         return
 
-    # Re-validate target index (scrap array may have changed)
-    if tractor_target >= scrap.size():
-        tractor_target = -1
+    # Validate target is still in scrap array
+    if not tractor_target.is_empty() and not scrap.has(tractor_target):
+        tractor_target = {}
 
     # Search for nearest target if none
-    if tractor_target == -1:
+    if tractor_target.is_empty():
         var nearest_dist: float = TRACTOR_RANGE
-        var nearest_idx:  int   = -1
-        for i: int in scrap.size():
-            var d: float = player_pos.distance_to(scrap[i].pos as Vector2)
+        var nearest_piece: Dictionary = {}
+        for piece in scrap:
+            var d: float = player_pos.distance_to(piece.pos as Vector2)
             if d < nearest_dist:
-                nearest_dist = d
-                nearest_idx  = i
-        tractor_target = nearest_idx
+                nearest_dist  = d
+                nearest_piece = piece
+        tractor_target = nearest_piece
         return  # start pulling next tick
 
-    var piece: Dictionary = scrap[tractor_target]
+    var piece: Dictionary = tractor_target
     var diff: Vector2     = player_pos - (piece.pos as Vector2)
     var dist: float       = diff.length()
     if dist < 1.0:
@@ -594,8 +592,8 @@ func _step_tractor_beam(delta: float) -> void:
         if dist <= TRACTOR_DOCKING_DIST:
             player_cargo_aboard += float(piece.mass)
             player_mass         += float(piece.mass)
-            scrap.remove_at(tractor_target)
-            tractor_target = -1
+            scrap.erase(piece)    # remove by reference
+            tractor_target = {}
 
     else:
         # ── Over-capacity: rigid tether (pendulum constraint) ─────────────────
@@ -815,8 +813,8 @@ func _show_end_ui() -> void:
     if end_state == "victory":
         var total_scrap: float = player_cargo_aboard
         # Count any tethered over-capacity scrap
-        if tractor_active and tractor_target >= 0 and tractor_target < scrap.size():
-            total_scrap += float(scrap[tractor_target].mass)
+        if tractor_active and not tractor_target.is_empty():
+            total_scrap += float(tractor_target.mass)
         message_label.text = "Victory!\nScrap collected: %.0f t" % total_scrap
     elif end_state == "defeat":
         message_label.text = "Defeat!"
