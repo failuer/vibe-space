@@ -306,12 +306,14 @@ func _step_simulation(delta: float) -> void:
                             nearest_dist    = d
                             nearest_missile = missile
                 if nearest_missile != null:
-                    enemy.vel += ai.evade_missile(
+                    var evade_delta: Vector2 = ai.evade_missile(
                         enemy,
                         nearest_missile.pos as Vector2,
                         nearest_missile.vel as Vector2,
                         game_delta
                     )
+                    var evade_impulse: Vector2 = evade_delta * float(enemy.mass) / maxf(game_delta, 0.001)
+                    enemy.force_acc = (enemy.force_acc as Vector2) + evade_impulse
 
         # 3. Physics integration (uses velocities set by AI dispatcher)
         _integrate_motion(game_delta)
@@ -351,7 +353,7 @@ func _integrate_motion(delta: float) -> void:
     # Apply gravity: each emitter attracts all other bodies
     for emitter in emitters:
         var ep: Vector2 = emitter.pos as Vector2
-        var em: float   = emitter.mass as float
+        var em: float   = float(emitter.mass)
 
         # → player
         if player_alive and emitter.get("pos_ref") != "player":
@@ -617,24 +619,24 @@ func _apply_blast_impulse(blast_pos: Vector2, blast_radius: float) -> void:
         if not enemy.alive:
             continue
         var diff: Vector2 = (enemy.pos as Vector2) - blast_pos
-        var dist := diff.length()
+        var dist: float = diff.length()
         if dist < blast_radius and dist > 0.1:
-            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
-            enemy.vel = (enemy.vel as Vector2) + diff.normalized() * force
+            var delta_v: Vector2 = diff.normalized() * EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            enemy.force_acc = (enemy.force_acc as Vector2) + delta_v * float(enemy.mass)
 
     for missile in missiles:
         var diff: Vector2 = (missile.pos as Vector2) - blast_pos
-        var dist := diff.length()
+        var dist: float = diff.length()
         if dist < blast_radius and dist > 0.1:
-            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            var force: float = EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
             missile.vel = (missile.vel as Vector2) + diff.normalized() * force
 
     if player_alive:
-        var diff := player_pos - blast_pos
-        var dist := diff.length()
+        var diff: Vector2 = player_pos - blast_pos
+        var dist: float = diff.length()
         if dist < blast_radius and dist > 0.1:
-            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
-            player_vel += diff.normalized() * force
+            var delta_v: Vector2 = diff.normalized() * EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            player_force_acc += delta_v * player_mass
 
 
 func _step_explosions(delta: float) -> void:
