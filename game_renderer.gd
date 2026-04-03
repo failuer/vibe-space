@@ -21,18 +21,26 @@ func _draw() -> void:
             _draw_hp_bar(enemy.pos as Vector2, enemy.vel as Vector2, game.ENEMY_RADIUS, enemy.hp as int, game.ENEMY_MAX_HP)
 
     for missile in game.missiles:
-        var col: Color = game.MISSILE_COLOR
-        if not missile.from_player:
-            col = game.ENEMY_MISSILE_COLOR
-        _draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, col)
+        var is_homing: bool = missile.get("homing", false) as bool
+        if not (missile.from_player as bool):
+            _draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, game.ENEMY_MISSILE_COLOR)
+        elif is_homing:
+            _draw_homing_missile(missile.pos as Vector2, missile.vel as Vector2)
+        else:
+            _draw_missile_triangle(missile.pos as Vector2, missile.vel as Vector2, game.MISSILE_RADIUS, game.MISSILE_COLOR)
 
     _draw_explosions()
     _draw_debris()
+    _draw_scrap()
+    _draw_tractor_beam()
+    _draw_mines()
 
     if game.phase == Game.GamePhase.PLANNING and game.player_alive:
-        _draw_turn_wedge()
-        _draw_planned_path()
-        _draw_planned_ghost()
+        _draw_thrust_arrow()
+        _draw_thrust_preview()
+
+    if game.player_alive:
+        _draw_hud_hp()
 
 
 func _draw_hp_bar(center: Vector2, vel: Vector2, radius: float, current_hp: int, max_hp: int) -> void:
@@ -81,6 +89,27 @@ func _draw_missile_triangle(center: Vector2, vel: Vector2, radius: float, color:
     var back_left := center - fwd * radius * 0.6 + right * radius * 0.4
     var back_right := center - fwd * radius * 0.6 - right * radius * 0.4
     draw_polygon(PackedVector2Array([tip, back_left, back_right]), PackedColorArray([color, color, color]))
+
+
+func _draw_homing_missile(center: Vector2, vel: Vector2) -> void:
+    var fwd: Vector2   = vel.normalized() if vel != Vector2.ZERO else Vector2.UP
+    var right: Vector2 = Vector2(-fwd.y, fwd.x)
+    var r: float       = game.MISSILE_RADIUS
+    var col: Color     = game.HOMING_COLOR
+
+    # Thin needle body
+    var tip: Vector2 = center + fwd  * r * 1.4
+    var bl:  Vector2 = center - fwd  * r * 0.9 + right * r * 0.25
+    var br:  Vector2 = center - fwd  * r * 0.9 - right * r * 0.25
+    draw_polygon(PackedVector2Array([tip, bl, br]), PackedColorArray([col, col, col]))
+
+    # Delta wing outline (larger triangle over rear half)
+    var wl: Vector2 = center - fwd * r * 0.1 + right * r * 1.1
+    var wr: Vector2 = center - fwd * r * 0.1 - right * r * 1.1
+    var wt: Vector2 = center + fwd * r * 0.4
+    draw_line(wt, wl, Color(col.r, col.g, col.b, 0.8), 1.2)
+    draw_line(wt, wr, Color(col.r, col.g, col.b, 0.8), 1.2)
+    draw_line(wl, wr, Color(col.r, col.g, col.b, 0.5), 1.2)
 
 
 func _draw_play_area_inner_border() -> void:
@@ -198,68 +227,56 @@ func _draw_starfield() -> void:
                     draw_circle(world_pos, radius, game.STAR_COLOR)
 
 
-func _draw_planned_path() -> void:
-    var steps := 18
-    var dt := game.SIM_DURATION / float(steps)
+func _draw_thrust_arrow() -> void:
+    var thrust: Vector2 = game.planned_thrust
+    if thrust == Vector2.ZERO:
+        return
+    var raw_len: float = thrust.length()
+    if raw_len < 1.0:
+        return
+    var ratio: float    = minf(raw_len / game.MAX_PLAYER_THRUST, 1.0)
+    var dir: Vector2    = thrust.normalized()
+    var arrow_len: float = ratio * game.THRUST_ARROW_MAX_LEN
 
-    var preview_pos := game.player_pos
-    var preview_vel := game.player_vel
-    var preview_speed := game.planned_player_speed
-    var preview_turn_rate: float = 0.0
-    if game.SIM_DURATION > 0.0:
-        preview_turn_rate = game.planned_turn_angle / game.SIM_DURATION
+    var tip: Vector2    = game.player_pos + dir * arrow_len
+    var shaft_col: Color = Color(0.3, 1.0, 0.45, 0.7)
+    var head_size: float = 8.0
 
-    var prev := preview_pos
+    # Shaft
+    draw_line(game.player_pos, tip, shaft_col, 2.0)
+
+    # Arrowhead
+    var perp: Vector2 = Vector2(-dir.y, dir.x)
+    draw_line(tip, tip - dir * head_size + perp * head_size * 0.5, shaft_col, 2.0)
+    draw_line(tip, tip - dir * head_size - perp * head_size * 0.5, shaft_col, 2.0)
+
+    # Dim indicator dot when thrust is at max (mouse beyond max range)
+    if ratio >= 1.0:
+        draw_circle(tip, 3.0, Color(0.3, 1.0, 0.45, 0.4))
+
+
+func _draw_thrust_preview() -> void:
+    var thrust: Vector2  = game.planned_thrust
+    var steps: int       = 20
+    var dt: float        = game.SIM_DURATION / float(steps)
+    var mass: float      = game.player_mass
+
+    var ppos: Vector2 = game.player_pos
+    var pvel: Vector2 = game.player_vel
+    var accel: Vector2 = thrust / mass
+    # Gravity intentionally omitted — this is a "dumb" preview (see design spec Section 2).
+
+    var dot_col: Color = Color(0.3, 1.0, 0.45, 0.35)
     for i in steps:
-        var step_angle := preview_turn_rate * dt
-        if step_angle != 0.0:
-            preview_vel = preview_vel.rotated(step_angle)
-        preview_vel = preview_vel.normalized() * preview_speed
-        preview_pos += preview_vel * dt
-        draw_line(prev, preview_pos, game.PLANNED_VECTOR_COLOR, 2.0)
-        prev = preview_pos
+        pvel += accel * dt
+        ppos += pvel * dt
+        draw_circle(ppos, 2.5, dot_col)
 
-
-func _draw_planned_ghost() -> void:
-    var col := game.PLAYER_COLOR
-    col.a = 0.35
-    var tip_pos := game._arc_endpoint(game.player_pos, game.player_vel.normalized(), game.planned_player_speed, game.planned_turn_angle)
-    var end_facing := game.player_vel.normalized().rotated(game.planned_turn_angle)
-    # Offset center back so the triangle TIP lands exactly at tip_pos (arc endpoint)
-    var center := tip_pos - end_facing.normalized() * game.PLAYER_RADIUS
-    _draw_ship_triangle(center, end_facing, game.PLAYER_RADIUS, col)
-
-
-func _draw_turn_wedge() -> void:
-    var forward_dir := game.player_vel.normalized()
-    if forward_dir == Vector2.ZERO:
-        forward_dir = Vector2.UP
-
-    var segments: int = 40
-    var col := game.PLANNED_VECTOR_COLOR
-    col.a = 0.25
-
-    var outer_pts: Array[Vector2] = []
-    for i in range(segments + 1):
-        var t := float(i) / float(segments)
-        var ang := -game.turn_limit_this_turn + 2.0 * game.turn_limit_this_turn * t
-        var center := game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_max, ang)
-        outer_pts.append(center + forward_dir.rotated(ang) * game.PLAYER_RADIUS)
-
-    var inner_pts: Array[Vector2] = []
-    for i in range(segments + 1):
-        var t := float(i) / float(segments)
-        var ang := game.turn_limit_this_turn - 2.0 * game.turn_limit_this_turn * t
-        var center := game._arc_endpoint(game.player_pos, forward_dir, game.turn_speed_min, ang)
-        inner_pts.append(center + forward_dir.rotated(ang) * game.PLAYER_RADIUS)
-
-    for i in range(outer_pts.size() - 1):
-        draw_line(outer_pts[i], outer_pts[i + 1], col, 1.0)
-    for i in range(inner_pts.size() - 1):
-        draw_line(inner_pts[i], inner_pts[i + 1], col, 1.0)
-
-    draw_line(outer_pts[0], inner_pts[inner_pts.size() - 1], col, 1.0)
-    draw_line(outer_pts[outer_pts.size() - 1], inner_pts[0], col, 1.0)
+    # Ghost ship at endpoint, facing predicted velocity
+    if pvel.length() > 0.1:
+        var ghost_col: Color = game.PLAYER_COLOR
+        ghost_col.a   = 0.3
+        _draw_ship_triangle(ppos, pvel, game.PLAYER_RADIUS, ghost_col)
 
 
 func _draw_explosions() -> void:
@@ -271,6 +288,88 @@ func _draw_explosions() -> void:
         var ring_color := Color(1.0, 0.5, 0.1, alpha) if is_ship else Color(1.0, 0.9, 0.3, alpha)
         if current_r > 1.0:
             draw_arc(explosion.pos as Vector2, current_r, 0.0, TAU, 32, ring_color, 2.5)
+
+
+func _draw_scrap() -> void:
+    for piece in game.scrap:
+        var pos: Vector2   = piece.pos as Vector2
+        var angle: float   = float(piece.angle)
+        var mass: float    = float(piece.mass)
+        # Size scales with mass: 1t → r≈7.7, 3t → r≈11.1
+        var r: float       = 6.0 + mass * 1.7
+        var col: Color     = game.SCRAP_COLOR
+
+        # Irregular hexagon — 6 verts with slight radius variation
+        var verts: PackedVector2Array = PackedVector2Array()
+        var offsets: Array[float] = [0.9, 1.1, 0.8, 1.0, 1.15, 0.85]
+        for i: int in 6:
+            var a: float = angle + float(i) * TAU / 6.0
+            verts.append(pos + Vector2(cos(a), sin(a)) * r * float(offsets[i]))
+        var cols: PackedColorArray = PackedColorArray()
+        cols.resize(6)
+        cols.fill(col)
+        draw_polygon(verts, cols)
+
+        # Outline
+        for i: int in 6:
+            draw_line(verts[i], verts[(i + 1) % 6], Color(col.r, col.g, col.b, 0.5), 1.0)
+
+
+func _draw_tractor_beam() -> void:
+    if not game.tractor_active or not game.player_alive:
+        return
+
+    var gold: Color = Color(0.961, 0.773, 0.259)  # #f5c542
+    var red: Color  = Color(1.0, 0.267, 0.267, 0.8)
+
+    if game.tractor_target.is_empty():
+        # Searching — draw a pulsing circle stub
+        draw_circle(game.player_pos, 6.0, Color(gold.r, gold.g, gold.b, 0.4))
+        return
+
+    var piece: Dictionary  = game.tractor_target
+    var ppos: Vector2      = piece.pos as Vector2
+    var remaining_cap: float = game.PLAYER_CARGO_CAP - game.player_cargo_aboard
+    var fits: bool           = float(piece.mass) <= remaining_cap + 0.01
+    var beam_col: Color      = gold if fits else red
+
+    draw_line(game.player_pos, ppos, beam_col, 1.5)
+    draw_circle(ppos, game.SCRAP_RADIUS * 1.3, Color(beam_col.r, beam_col.g, beam_col.b, 0.25))
+
+
+func _draw_mines() -> void:
+    for mine in game.mines:
+        if not (mine.alive as bool):
+            continue
+        var pos:      Vector2 = mine.pos as Vector2
+        var armed:    bool    = float(mine.arm_timer) <= 0.0
+        var triggered: bool   = mine.triggered as bool
+        var r:        float   = game.MINE_RADIUS
+        var col:      Color   = game.MINE_COLOR
+
+        # Pulse alpha when triggered
+        var alpha: float = 1.0
+        if triggered:
+            alpha = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)
+
+        # 8 spike lines + tip dots
+        for i: int in 8:
+            var a: float       = float(i) * TAU / 8.0
+            var inner: Vector2 = pos + Vector2(cos(a), sin(a)) * r
+            var outer: Vector2 = pos + Vector2(cos(a), sin(a)) * (r + 5.0)
+            draw_line(inner, outer, Color(col.r, col.g, col.b, alpha * 0.9), 1.5)
+            draw_circle(outer, 1.2, Color(col.r, col.g, col.b, alpha))
+
+        # Body circle
+        var fill_col: Color = Color(col.r, col.g, col.b, alpha * 0.15)
+        draw_circle(pos, r, fill_col)
+        draw_arc(pos, r, 0.0, TAU, 24, Color(col.r, col.g, col.b, alpha), 1.5)
+
+        # Arming ring (shrinks during arming phase)
+        if not armed:
+            var arm_ratio: float = float(mine.arm_timer) / game.MINE_ARM_TIME
+            draw_arc(pos, r * (1.0 + arm_ratio * 0.5), 0.0, TAU, 16,
+                     Color(col.r, col.g, col.b, 0.3 * arm_ratio), 1.0)
 
 
 func _draw_debris() -> void:
@@ -285,3 +384,27 @@ func _draw_debris() -> void:
         var p1 := pos + Vector2(cos(angle + TAU * 0.333), sin(angle + TAU * 0.333)) * size
         var p2 := pos + Vector2(cos(angle + TAU * 0.667), sin(angle + TAU * 0.667)) * size
         draw_polygon(PackedVector2Array([p0, p1, p2]), PackedColorArray([color, color, color]))
+
+
+func _draw_hud_hp() -> void:
+    var pip_size: float = 11.0
+    var pip_gap:  float = 3.0
+    # Top-left in world space: player_pos - half viewport
+    var world_origin: Vector2 = game.player_pos - get_viewport_rect().size * 0.5 + Vector2(14.0, 14.0)
+
+    for i: int in game.PLAYER_MAX_HP:
+        var cx: float = world_origin.x + float(i) * (pip_size + pip_gap) + pip_size * 0.5
+        var cy: float = world_origin.y + pip_size * 0.5
+        var filled: bool = i < game.player_hp
+        if filled:
+            var pts: PackedVector2Array = PackedVector2Array([
+                Vector2(cx - pip_size * 0.5, cy - pip_size * 0.5),
+                Vector2(cx + pip_size * 0.5, cy - pip_size * 0.5),
+                Vector2(cx + pip_size * 0.5, cy + pip_size * 0.5),
+                Vector2(cx - pip_size * 0.5, cy + pip_size * 0.5),
+            ])
+            draw_polygon(pts, PackedColorArray([game.PLAYER_COLOR, game.PLAYER_COLOR,
+                                                game.PLAYER_COLOR, game.PLAYER_COLOR]))
+        else:
+            draw_rect(Rect2(cx - pip_size * 0.5, cy - pip_size * 0.5, pip_size, pip_size),
+                      Color(1.0, 1.0, 1.0, 0.15), false, 1.0)

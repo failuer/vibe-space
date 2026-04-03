@@ -1,8 +1,7 @@
-[gd_scene load_steps=4 format=3 uid="uid://c8b65jlgemdbf"]
+[gd_scene load_steps=3 format=3 uid="uid://c8b65jlgemdbf"]
 
 [ext_resource type="Script" path="res://game.gd" id="1_wtcfe"]
 [ext_resource type="Script" path="res://game_renderer.gd" id="2_renderer"]
-[ext_resource type="Script" path="res://ammo_display.gd" id="3_ammo"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_wtcfe")
@@ -65,6 +64,3 @@ anchors_preset = -1
 anchor_bottom = 1.0
 offset_right = 0.0
 
-[node name="AmmoDisplay" type="Control" parent="CanvasLayer/FireButtonContainer"]
-custom_minimum_size = Vector2(180, 20)
-script = ExtResource("3_ammo")

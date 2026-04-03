@@ -14,23 +14,29 @@ const PLAYER_RADIUS := 16.0
 const ENEMY_RADIUS := 16.0
 const MISSILE_RADIUS := 8.0
 
-const PLAYER_SPEED_DEFAULT := 140.0 # units per second
-const PLAYER_SPEED_MIN := 80.0
-const PLAYER_SPEED_MAX := 220.0
-const PLAYER_SPEED_DELTA := 80.0  # max speed change per turn (units/sec)
-const PLAYER_SPEED_STEP := 25.0
 const ENEMY_SPEED := 140.0
 const MISSILE_SPEED := 300.0
 const SCENE_RADIUS := 1000.0 # missiles/enemies beyond this are considered gone
-const MAX_TURN_RADIANS := PI / 2.0 # max turn per planning step (90 degrees)
 
-const PLAYER_COLOR := Color(0.3, 0.9, 1.0)
+# ── Physics ─────────────────────────────────────────────────────────────────
+const PLAYER_MASS             := 10.0   # tonnes
+const ENEMY_MASS              := 8.0    # tonnes
+const MAX_PLAYER_THRUST       := 1200.0 # force units — gives ~120 units/s² at base mass
+const MAX_ENEMY_THRUST        := 1000.0
+const GRAVITY_EMIT_MIN_MASS   := 6.0    # bodies below this mass don't emit gravity
+
+# ── Planning UI ──────────────────────────────────────────────────────────────
+# Mouse distance (world units) that maps to MAX_PLAYER_THRUST.
+const THRUST_ARROW_MAX_LEN    := 180.0
+
+const PLAYER_COLOR := Color(1.0, 1.0, 1.0)          # white
 const ENEMY_COLOR := Color(1.0, 0.4, 0.4)
-const MISSILE_COLOR := Color(1.0, 1.0, 0.4)
+const MISSILE_COLOR       := Color(1.0, 0.267, 0.267)   # red   #ff4444
+const HOMING_COLOR        := Color(0.412, 1.0,  0.490)   # lime  #69ff7d
+const MINE_COLOR          := Color(1.0, 0.667, 0.200)    # amber #ffaa33
+const SCRAP_COLOR         := Color(0.627, 0.659, 0.690)  # grey  #a0a8b0
 const ENEMY_MISSILE_COLOR := Color(1.0, 0.6, 0.2)
-const PLANNED_VECTOR_COLOR := Color(0.5, 1.0, 0.5)
 const STAR_COLOR := Color(0.85, 0.90, 1.0, 0.45)
-const BORDER_COLOR := Color(1.0, 0.0, 0.0, 0.1)
 
 const PLAY_AREA_HALF_EXTENTS := Vector2(975.0, 675.0) # 50% larger
 const PLAY_BORDER_THICKNESS := 80.0
@@ -57,6 +63,19 @@ const DEBRIS_HP_DAMAGE := 1
 const PLAYER_MAX_MISSILES := 10
 const PLAYER_FIRE_COOLDOWN := 4.0
 
+# ── Homing missile ───────────────────────────────────────────────────────────
+const PLAYER_MAX_HOMING      := 5
+const PLAYER_HOMING_COOLDOWN := 4.5
+const HOMING_TURN_RATE       := 1.2   # radians/sec steering correction
+
+# ── Mine ─────────────────────────────────────────────────────────────────────
+const PLAYER_MAX_MINES     := 3
+const PLAYER_MINE_COOLDOWN := 2.0
+const MINE_RADIUS          := 9.0
+const MINE_ARM_TIME        := 1.0   # seconds before proximity trigger activates
+const MINE_TRIGGER_RADIUS  := 40.0  # proximity detection radius
+const MINE_TRIGGER_DELAY   := 0.2   # seconds after trigger before detonation
+
 const ENEMY_MAX_MISSILES := 6
 const ENEMY_FIRE_COOLDOWN := 3.5
 const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
@@ -64,12 +83,19 @@ const ENEMY_FIRE_ANGLE_THRESHOLD := PI / 4.0  # 45 degrees
 const EVASION_DETECT_RADIUS := 80.0   # px — missile proximity triggering evasion
 const ARCHETYPE_ROSTER := ["aggressor", "orbiter", "flanker"]
 
-const PLAYER_TURN_RATE := MAX_TURN_RADIANS * 1.5 / SIM_DURATION # baseline sharper turns
+# ── Tractor beam ─────────────────────────────────────────────────────────────
+const TRACTOR_RANGE        := 250.0   # search radius (units)
+const TRACTOR_SPRING_K     := 0.2     # spring constant for reel-in force
+const TRACTOR_DOCKING_DIST := 30.0   # distance at which scrap is absorbed
+const TETHER_LENGTH        := 200.0   # max tether length when over-capacity
+const PLAYER_CARGO_CAP     := 4.0     # max tonnes that can be absorbed
 
-const ARROW_MIN_DIST := PLAYER_SPEED_MIN * SIM_DURATION
-const ARROW_MAX_DIST := PLAYER_SPEED_MAX * SIM_DURATION
-const ARROW_NEAR_HALF_WIDTH := 40.0
-const ARROW_FAR_HALF_WIDTH := 220.0
+# ── Scrap ────────────────────────────────────────────────────────────────────
+const SCRAP_RADIUS         := 10.0
+const SCRAP_MASS_MIN       := 1.0   # tonnes
+const SCRAP_MASS_MAX       := 3.0
+const SCRAP_SPAWN_COUNT    := 3     # pieces placed at game start
+const SCRAP_FROM_EXPLOSION := 2     # pieces per destroyed enemy ship
 
 const STAR_TILE_SIZE := Vector2(900.0, 700.0)
 const STAR_LAYER_COUNT := 3
@@ -80,36 +106,46 @@ const STAR_RADIUS_BY_LAYER := [1.5, 1.2, 1.0]
 @onready var camera: Camera2D = $Camera2D
 @onready var message_label: Label = $CanvasLayer/MessageLabel
 @onready var restart_button: Button = $CanvasLayer/RestartButton
-@onready var fire_button: Button = $CanvasLayer/FireButtonContainer/FireButton
-@onready var cooldown_fill: ColorRect = $CanvasLayer/FireButtonContainer/FireButton/CooldownFill
-@onready var ammo_display: Control = $CanvasLayer/FireButtonContainer/AmmoDisplay
+
+var slot_buttons:   Array[Button]    = []
+var slot_cooldowns: Array[ColorRect] = []
+var tractor_button: Button
+var mass_label:     Label
+var cargo_label:    Label
+var cargo_bar:      ColorRect
+var cargo_bar_bg:   ColorRect
 
 var phase: GamePhase = GamePhase.PLANNING
 var sim_time_left: float = 0.0
 var sim_real_elapsed: float = 0.0
 
 var player_pos: Vector2 = Vector2.ZERO
-var player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
-var player_speed: float = PLAYER_SPEED_DEFAULT
+var player_vel: Vector2 = Vector2.UP * 80.0    # initial drift velocity
+var player_mass: float = PLAYER_MASS
+var player_force_acc: Vector2 = Vector2.ZERO
+var planned_thrust: Vector2 = Vector2.ZERO     # set each planning phase
 var player_alive: bool = true
 var player_hp: int = PLAYER_MAX_HP
 var player_missiles_remaining: int = PLAYER_MAX_MISSILES
 var player_fire_cooldown: float = 0.0
-
-var turn_speed_min: float = PLAYER_SPEED_MIN
-var turn_speed_max: float = PLAYER_SPEED_MAX
-
-var planned_player_vel: Vector2 = Vector2.UP * PLAYER_SPEED_DEFAULT
-var planned_player_speed: float = PLAYER_SPEED_DEFAULT
-var planned_player_target_dir: Vector2 = Vector2.UP # kept for reference but no longer used for homing
-var planned_turn_angle: float = 0.0
-var current_turn_rate: float = 0.0 # radians/sec for active slice
-var turn_limit_this_turn: float = MAX_TURN_RADIANS
+var player_homing_remaining: int   = PLAYER_MAX_HOMING
+var player_homing_cooldown:  float = 0.0
+var active_weapon: int = 0   # 0 = missile, 1 = homing, 2 = mine
+var player_mine_remaining: int   = PLAYER_MAX_MINES
+var player_mine_cooldown:  float = 0.0
+var mines: Array = []
+# mine dict: {pos, vel, arm_timer, trigger_timer, triggered, alive}
 
 var enemies: Array = [] # each: {pos, vel, alive, missiles_remaining, fire_cooldown}
 var missiles: Array = [] # each: {pos: Vector2, vel: Vector2, from_player: bool}
 var explosions: Array = []  # each: {pos, vel, lifetime, max_lifetime, radius, is_ship}
 var debris: Array = []  # each: {pos, vel, angle, angular_vel, lifetime, max_lifetime, size, hp_dealt: bool}
+var scrap: Array = []  # each: {pos, vel, mass, force_acc, angle, angular_vel}
+
+# ── Tractor beam state ────────────────────────────────────────────────────────
+var tractor_active: bool       = false
+var tractor_target: Dictionary = {}    # the scrap piece dict being tractored; empty = no target
+var player_cargo_aboard: float = 0.0
 
 var end_state: StringName = ""
 var end_timer: float = 0.0
@@ -120,30 +156,154 @@ var _stars_by_layer: Array = [] # each layer: Array[Vector2] positions inside ST
 func _ready() -> void:
     randomize()
     _generate_stars()
+    # Remove old fire button container if it still exists in the scene
+    var old_container: Node = $CanvasLayer.get_node_or_null("FireButtonContainer")
+    if old_container:
+        old_container.queue_free()
     _reset_game()
     restart_button.pressed.connect(_on_restart_pressed)
-    fire_button.pressed.connect(_try_fire_player)
+    _build_hud()
 
-    var style := StyleBoxFlat.new()
-    style.bg_color = Color(0, 0, 0, 0)
-    style.border_width_left = 2
-    style.border_width_right = 2
-    style.border_width_top = 2
-    style.border_width_bottom = 2
-    style.border_color = Color(0.3, 0.91, 1.0, 1.0)
-    style.corner_radius_top_left = 22
-    style.corner_radius_top_right = 22
-    style.corner_radius_bottom_left = 22
-    style.corner_radius_bottom_right = 22
-    fire_button.add_theme_stylebox_override("normal", style)
-    fire_button.add_theme_stylebox_override("hover", style)
-    fire_button.add_theme_stylebox_override("pressed", style)
-    fire_button.add_theme_stylebox_override("disabled", style)
-    fire_button.add_theme_color_override("font_color", Color(0.3, 0.91, 1.0))
-    fire_button.add_theme_color_override("font_disabled_color", Color(0.3, 0.91, 1.0, 0.3))
+func _build_hud() -> void:
+    var canvas: CanvasLayer = $CanvasLayer
 
-    ammo_display.missiles_max = PLAYER_MAX_MISSILES
-    ammo_display.missiles_remaining = player_missiles_remaining
+    var weapon_colors: Array[Color] = [MISSILE_COLOR, HOMING_COLOR, MINE_COLOR]
+    var weapon_names: Array[String]  = ["MISSILE", "HOMING", "MINE"]
+
+    # ── Bottom-center: weapon slots ───────────────────────────────────────────
+    var slot_container: HBoxContainer = HBoxContainer.new()
+    slot_container.add_theme_constant_override("separation", 8)
+    slot_container.anchor_top    = 1.0
+    slot_container.anchor_bottom = 1.0
+    slot_container.anchor_left   = 0.5
+    slot_container.anchor_right  = 0.5
+    slot_container.offset_top    = -86.0
+    slot_container.offset_bottom = -14.0
+    slot_container.offset_left   = -120.0
+    slot_container.offset_right  = 120.0
+    canvas.add_child(slot_container)
+
+    for i: int in 3:
+        var col: Color = weapon_colors[i]
+        var vbox: VBoxContainer = VBoxContainer.new()
+        vbox.add_theme_constant_override("separation", 3)
+        slot_container.add_child(vbox)
+
+        var hotkey_lbl: Label = Label.new()
+        hotkey_lbl.text = "[%d]" % (i + 1)
+        hotkey_lbl.add_theme_font_size_override("font_size", 9)
+        hotkey_lbl.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
+        hotkey_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        vbox.add_child(hotkey_lbl)
+
+        var btn: Button = Button.new()
+        btn.text = weapon_names[i]
+        btn.custom_minimum_size = Vector2(72, 52)
+        btn.pressed.connect(Callable(self, "_on_slot_pressed").bind(i))
+        var sty: StyleBoxFlat = StyleBoxFlat.new()
+        sty.bg_color = Color(0, 0, 0, 0)
+        sty.border_width_left   = 2
+        sty.border_width_right  = 2
+        sty.border_width_top    = 2
+        sty.border_width_bottom = 2
+        sty.border_color = col
+        sty.corner_radius_top_left     = 8
+        sty.corner_radius_top_right    = 8
+        sty.corner_radius_bottom_left  = 8
+        sty.corner_radius_bottom_right = 8
+        btn.add_theme_stylebox_override("normal",   sty)
+        btn.add_theme_stylebox_override("hover",    sty)
+        btn.add_theme_stylebox_override("pressed",  sty)
+        btn.add_theme_stylebox_override("disabled", sty)
+        btn.add_theme_color_override("font_color",          col)
+        btn.add_theme_color_override("font_disabled_color", Color(col.r, col.g, col.b, 0.3))
+        btn.add_theme_font_size_override("font_size", 9)
+        vbox.add_child(btn)
+        slot_buttons.append(btn)
+
+        var cd_fill: ColorRect = ColorRect.new()
+        cd_fill.color = col
+        cd_fill.custom_minimum_size = Vector2(0, 3)
+        cd_fill.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+        btn.add_child(cd_fill)
+        slot_cooldowns.append(cd_fill)
+
+    # ── Top-center: tractor toggle ────────────────────────────────────────────
+    tractor_button = Button.new()
+    tractor_button.text = "TRACTOR"
+    tractor_button.anchor_left   = 0.5
+    tractor_button.anchor_right  = 0.5
+    tractor_button.anchor_top    = 0.0
+    tractor_button.anchor_bottom = 0.0
+    tractor_button.offset_left   = -55.0
+    tractor_button.offset_right  = 55.0
+    tractor_button.offset_top    = 12.0
+    tractor_button.offset_bottom = 36.0
+    tractor_button.pressed.connect(_on_tractor_pressed)
+    var tst: StyleBoxFlat = StyleBoxFlat.new()
+    tst.bg_color = Color(0.961, 0.773, 0.259, 0.1)
+    tst.border_width_left   = 2
+    tst.border_width_right  = 2
+    tst.border_width_top    = 2
+    tst.border_width_bottom = 2
+    tst.border_color = Color(0.961, 0.773, 0.259)
+    tst.corner_radius_top_left     = 12
+    tst.corner_radius_top_right    = 12
+    tst.corner_radius_bottom_left  = 12
+    tst.corner_radius_bottom_right = 12
+    tractor_button.add_theme_stylebox_override("normal",  tst)
+    tractor_button.add_theme_stylebox_override("hover",   tst)
+    tractor_button.add_theme_stylebox_override("pressed", tst)
+    tractor_button.add_theme_color_override("font_color", Color(0.961, 0.773, 0.259))
+    tractor_button.add_theme_font_size_override("font_size", 9)
+    canvas.add_child(tractor_button)
+
+    # ── Top-right: mass + cargo cluster ──────────────────────────────────────
+    var tr_vbox: VBoxContainer = VBoxContainer.new()
+    tr_vbox.anchor_left   = 1.0
+    tr_vbox.anchor_right  = 1.0
+    tr_vbox.anchor_top    = 0.0
+    tr_vbox.anchor_bottom = 0.0
+    tr_vbox.offset_left   = -110.0
+    tr_vbox.offset_right  = -12.0
+    tr_vbox.offset_top    = 12.0
+    tr_vbox.offset_bottom = 60.0
+    tr_vbox.alignment     = BoxContainer.ALIGNMENT_END
+    canvas.add_child(tr_vbox)
+
+    mass_label = Label.new()
+    mass_label.add_theme_font_size_override("font_size", 14)
+    mass_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+    mass_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    tr_vbox.add_child(mass_label)
+
+    cargo_bar_bg = ColorRect.new()
+    cargo_bar_bg.color               = Color(1, 1, 1, 0.07)
+    cargo_bar_bg.custom_minimum_size = Vector2(88, 4)
+    tr_vbox.add_child(cargo_bar_bg)
+
+    cargo_bar = ColorRect.new()
+    cargo_bar.color = Color(0.961, 0.773, 0.259)
+    cargo_bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+    cargo_bar.anchor_right = 0.0
+    cargo_bar_bg.add_child(cargo_bar)
+
+    cargo_label = Label.new()
+    cargo_label.add_theme_font_size_override("font_size", 9)
+    cargo_label.add_theme_color_override("font_color", Color(0.961, 0.773, 0.259, 0.7))
+    cargo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    tr_vbox.add_child(cargo_label)
+
+
+func _on_slot_pressed(slot: int) -> void:
+    active_weapon = slot
+
+
+func _on_tractor_pressed() -> void:
+    tractor_active = not tractor_active
+    if not tractor_active:
+        tractor_target = {}
+
 
 func _generate_stars() -> void:
     _stars_by_layer.clear()
@@ -167,20 +327,20 @@ func _make_ai_state(archetype: String) -> Dictionary:
 func _reset_game() -> void:
     # Initial player setup
     player_pos = Vector2.ZERO
-    player_vel = Vector2.UP * PLAYER_SPEED_DEFAULT
-    player_speed = PLAYER_SPEED_DEFAULT
+    player_vel       = Vector2.UP * 80.0
+    player_mass      = PLAYER_MASS
+    player_force_acc = Vector2.ZERO
+    planned_thrust   = Vector2.ZERO
     player_alive = true
     player_hp = PLAYER_MAX_HP
     player_missiles_remaining = PLAYER_MAX_MISSILES
     player_fire_cooldown = 0.0
-    planned_player_vel = player_vel
-    planned_player_speed = player_speed
-    planned_player_target_dir = player_vel.normalized()
-    planned_turn_angle = 0.0
-    current_turn_rate = 0.0
-    turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
-    turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
-    turn_speed_max = player_speed + PLAYER_SPEED_DELTA
+    player_homing_remaining = PLAYER_MAX_HOMING
+    player_homing_cooldown  = 0.0
+    active_weapon           = 0
+    player_mine_remaining = PLAYER_MAX_MINES
+    player_mine_cooldown  = 0.0
+    mines.clear()
 
     # Enemy setup — each slot maps to an archetype in ARCHETYPE_ROSTER
     enemies.clear()
@@ -202,11 +362,24 @@ func _reset_game() -> void:
             "hp":                 ENEMY_MAX_HP,
             "archetype":          archetype,
             "ai_state":           _make_ai_state(archetype),
+            "mass":               ENEMY_MASS,       # ← new
+            "force_acc":          Vector2.ZERO,     # ← new
         })
 
     missiles.clear()
     explosions.clear()
     debris.clear()
+    scrap.clear()
+    for _i in SCRAP_SPAWN_COUNT:
+        var angle: float  = randf() * TAU
+        var dist: float   = randf_range(200.0, 500.0)
+        var spawn_pos: Vector2 = Vector2(cos(angle), sin(angle)) * dist
+        var drift_vel: Vector2 = Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0))
+        _spawn_scrap_piece(spawn_pos, drift_vel)
+
+    tractor_active      = false
+    tractor_target      = {}
+    player_cargo_aboard = 0.0
 
     phase = GamePhase.PLANNING
     sim_time_left = 0.0
@@ -220,7 +393,7 @@ func _reset_game() -> void:
     if is_node_ready():
         $Renderer.queue_redraw()
     if is_node_ready():
-        _update_fire_button_ui()
+        _update_hud()
 
 
 func _process(delta: float) -> void:
@@ -231,7 +404,7 @@ func _process(delta: float) -> void:
 
     camera.position = player_pos
     $Renderer.queue_redraw()
-    _update_fire_button_ui()
+    _update_hud()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -241,6 +414,14 @@ func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventKey and event.pressed and not event.echo:
         if event.keycode == KEY_SPACE:
             _try_fire_player()
+        if event.keycode == KEY_T:
+            _on_tractor_pressed()
+        if event.keycode == KEY_1:
+            active_weapon = 0
+        elif event.keycode == KEY_2:
+            active_weapon = 1
+        elif event.keycode == KEY_3:
+            active_weapon = 2
 
     if phase != GamePhase.PLANNING:
         return
@@ -257,13 +438,7 @@ func _start_simulation() -> void:
     phase = GamePhase.SIMULATING
     sim_time_left = SIM_DURATION
     sim_real_elapsed = 0.0
-
-    # Commit planned movement intent for this turn (movement will curve at a constant rate over the whole slice)
-    planned_player_target_dir = planned_player_vel.normalized()
-    player_speed = planned_player_speed
-    current_turn_rate = 0.0
-    if SIM_DURATION > 0.0:
-        current_turn_rate = planned_turn_angle / SIM_DURATION
+    # planned_thrust was set by _update_planned_vector during planning phase — nothing to commit
 
 
 
@@ -291,6 +466,10 @@ func _step_simulation(delta: float) -> void:
         # 1. Tick weapon cooldowns (before AI so should_fire sees updated cooldown)
         if player_fire_cooldown > 0.0:
             player_fire_cooldown = maxf(0.0, player_fire_cooldown - game_delta)
+        if player_homing_cooldown > 0.0:
+            player_homing_cooldown = maxf(0.0, player_homing_cooldown - game_delta)
+        if player_mine_cooldown > 0.0:
+            player_mine_cooldown = maxf(0.0, player_mine_cooldown - game_delta)
         for enemy in enemies:
             if enemy.alive and enemy.fire_cooldown > 0.0:
                 enemy.fire_cooldown = maxf(0.0, enemy.fire_cooldown - game_delta)
@@ -302,8 +481,12 @@ func _step_simulation(delta: float) -> void:
                     continue
                 var ai := _get_ai(enemy.archetype)
 
-                # Steering sets velocity for this frame
-                enemy.vel = ai.steer(enemy, self, game_delta)
+                # Steering — AI returns desired velocity; we convert to thrust
+                var desired_vel: Vector2 = ai.steer(enemy, self, game_delta)
+                var vel_error: Vector2   = desired_vel - (enemy.vel as Vector2)
+                var raw_thrust: Vector2  = vel_error * float(enemy.mass) / maxf(game_delta, 0.001)
+                var thrust: Vector2      = raw_thrust.clamped(MAX_ENEMY_THRUST)
+                enemy.force_acc = (enemy.force_acc as Vector2) + thrust
 
                 # Firing — archetype decides intent; _try_fire_enemy checks cooldown/ammo
                 if ai.should_fire(enemy, self):
@@ -319,17 +502,45 @@ func _step_simulation(delta: float) -> void:
                             nearest_dist    = d
                             nearest_missile = missile
                 if nearest_missile != null:
-                    enemy.vel += ai.evade_missile(
+                    var evade_delta: Vector2 = ai.evade_missile(
                         enemy,
                         nearest_missile.pos as Vector2,
                         nearest_missile.vel as Vector2,
                         game_delta
                     )
+                    var evade_impulse: Vector2 = evade_delta * float(enemy.mass) / maxf(game_delta, 0.001)
+                    enemy.force_acc = (enemy.force_acc as Vector2) + evade_impulse
 
-        # 3. Physics integration (uses velocities set by AI dispatcher)
+        # 3. Homing missile steering
+        for missile in missiles:
+            if not (missile.get("homing", false) as bool):
+                continue
+            if not (missile.from_player as bool):
+                continue
+            var nearest_enemy: Dictionary = {}
+            var nearest_dist: float       = INF
+            for enemy in enemies:
+                if not enemy.alive:
+                    continue
+                var d: float = (missile.pos as Vector2).distance_to(enemy.pos as Vector2)
+                if d < nearest_dist:
+                    nearest_dist  = d
+                    nearest_enemy = enemy
+            if nearest_enemy.is_empty():
+                continue
+            var to_target: Vector2   = ((nearest_enemy.pos as Vector2) - (missile.pos as Vector2)).normalized()
+            var current_dir: Vector2 = (missile.vel as Vector2).normalized()
+            var new_dir: Vector2     = current_dir.lerp(to_target, HOMING_TURN_RATE * game_delta).normalized()
+            missile.vel              = new_dir * MISSILE_SPEED
+
+        # 4. Tractor beam spring / tether (before integration so forces are included)
+        _step_tractor_beam(game_delta)
+
+        # 5. Physics integration (uses velocities set by AI dispatcher)
         _integrate_motion(game_delta)
         _handle_collisions()
         _step_explosions(game_delta)
+        _step_mines(game_delta)
         _check_leave_play_area()
         _cull_offscreen_objects()
 
@@ -338,30 +549,141 @@ func _step_simulation(delta: float) -> void:
 
     if sim_time_left <= 0.0 and phase == GamePhase.SIMULATING:
         phase = GamePhase.PLANNING
-        # Default next planned movement to "no new input"
-        if player_alive:
-            planned_player_vel = player_vel
-            planned_player_speed = player_speed
-            turn_limit_this_turn = _compute_turn_limit_for_speed(player_speed)
-            turn_speed_min = maxf(PLAYER_SPEED_MIN, player_speed - PLAYER_SPEED_DELTA)
-            turn_speed_max = player_speed + PLAYER_SPEED_DELTA
+        # player_vel naturally carries over — no momentum re-initialisation needed
+
+
+func _step_tractor_beam(delta: float) -> void:
+    if not tractor_active or not player_alive:
+        return
+
+    # Validate target is still in scrap array
+    if not tractor_target.is_empty() and not scrap.has(tractor_target):
+        tractor_target = {}
+
+    # Search for nearest target if none
+    if tractor_target.is_empty():
+        var nearest_dist: float = TRACTOR_RANGE
+        var nearest_piece: Dictionary = {}
+        for piece in scrap:
+            var d: float = player_pos.distance_to(piece.pos as Vector2)
+            if d < nearest_dist:
+                nearest_dist  = d
+                nearest_piece = piece
+        tractor_target = nearest_piece
+        return  # start pulling next tick
+
+    var piece: Dictionary = tractor_target
+    var diff: Vector2     = player_pos - (piece.pos as Vector2)
+    var dist: float       = diff.length()
+    if dist < 1.0:
+        return
+
+    var remaining_cap: float = PLAYER_CARGO_CAP - player_cargo_aboard
+    var fits: bool           = float(piece.mass) <= remaining_cap + 0.01
+
+    if fits:
+        # ── Spring reel-in ───────────────────────────────────────────────────
+        var spring_force: Vector2 = diff.normalized() * TRACTOR_SPRING_K * dist
+        piece.force_acc = (piece.force_acc as Vector2) + spring_force
+        # Reaction force on player (equal and opposite, mass-weighted feel)
+        player_force_acc += -spring_force * (float(piece.mass) / player_mass)
+
+        # Absorb when close enough
+        if dist <= TRACTOR_DOCKING_DIST:
+            player_cargo_aboard += float(piece.mass)
+            player_mass         += float(piece.mass)
+            scrap.erase(piece)    # remove by reference
+            tractor_target = {}
+
+    else:
+        # ── Over-capacity: rigid tether (pendulum constraint) ─────────────────
+        if dist > TETHER_LENGTH:
+            var penetration: float = dist - TETHER_LENGTH
+            var axis: Vector2      = diff.normalized()
+            var total_mass: float  = player_mass + float(piece.mass)
+            # Position correction split by mass ratio
+            player_pos             += axis * penetration * (float(piece.mass) / total_mass)
+            piece.pos               = (piece.pos as Vector2) + (-axis) * penetration * (player_mass / total_mass)
+            # Remove outward velocity component from both bodies
+            var player_outward: float = player_vel.dot(-axis)
+            var piece_outward: float  = (piece.vel as Vector2).dot(axis)
+            if player_outward < 0.0:
+                player_vel -= -axis * player_outward
+            if piece_outward < 0.0:
+                piece.vel = (piece.vel as Vector2) - axis * piece_outward
 
 
 func _integrate_motion(delta: float) -> void:
-    if player_alive:
-        # Rotate at a constant rate for this slice, using the committed speed.
-        var angle_step := current_turn_rate * delta
-        if angle_step != 0.0:
-            player_vel = player_vel.rotated(angle_step)
-        player_vel = player_vel.normalized() * player_speed
-        player_pos += player_vel * delta
-
+    # ── Gravity accumulation ──────────────────────────────────────────────────
+    # Build list of gravity-emitting bodies for pairwise calculation.
+    # Only bodies above GRAVITY_EMIT_MIN_MASS emit; all bodies receive.
+    var emitters: Array = []
+    if player_alive and player_mass >= GRAVITY_EMIT_MIN_MASS:
+        emitters.append({
+            "pos_ref":  "player",
+            "pos":      player_pos,
+            "mass":     player_mass,
+        })
     for enemy in enemies:
-        if enemy.alive:
-            enemy.pos += enemy.vel * delta
+        if enemy.alive and float(enemy.mass) >= GRAVITY_EMIT_MIN_MASS:
+            emitters.append({
+                "pos_ref": "enemy",
+                "enemy":   enemy,
+                "pos":     enemy.pos as Vector2,
+                "mass":    float(enemy.mass),
+            })
 
+    # Apply gravity: each emitter attracts all other bodies
+    for emitter in emitters:
+        var ep: Vector2 = emitter.pos as Vector2
+        var em: float   = float(emitter.mass)
+
+        # → player
+        if player_alive and emitter.get("pos_ref") != "player":
+            player_force_acc += PhysicsSim.gravity_force(ep, em, player_pos, player_mass)
+
+        # → enemies
+        for enemy in enemies:
+            if not enemy.alive:
+                continue
+            if emitter.get("pos_ref") == "enemy" and emitter.get("enemy") == enemy:
+                continue  # skip self
+            var gf: Vector2 = PhysicsSim.gravity_force(ep, em, enemy.pos as Vector2, float(enemy.mass))
+            enemy.force_acc = (enemy.force_acc as Vector2) + gf
+
+        # → scrap (receives gravity, does not emit)
+        for piece in scrap:
+            var gf: Vector2 = PhysicsSim.gravity_force(ep, em, piece.pos as Vector2, float(piece.mass))
+            piece.force_acc = (piece.force_acc as Vector2) + gf
+
+    # ── Player integration ────────────────────────────────────────────────────
+    if player_alive:
+        player_force_acc += planned_thrust
+        var accel: Vector2 = player_force_acc / player_mass
+        player_vel    += accel * delta
+        player_pos    += player_vel * delta
+        player_force_acc = Vector2.ZERO
+
+    # ── Enemy integration ─────────────────────────────────────────────────────
+    for enemy in enemies:
+        if not enemy.alive:
+            continue
+        var accel: Vector2 = (enemy.force_acc as Vector2) / float(enemy.mass)
+        enemy.vel       = (enemy.vel as Vector2) + accel * delta
+        enemy.pos       = (enemy.pos as Vector2) + (enemy.vel as Vector2) * delta
+        enemy.force_acc = Vector2.ZERO
+
+    # ── Missiles (no mass — just kinematic) ───────────────────────────────────
     for missile in missiles:
-        missile.pos += missile.vel * delta
+        missile.pos = (missile.pos as Vector2) + (missile.vel as Vector2) * delta
+
+    # ── Scrap integration ─────────────────────────────────────────────────────
+    for piece in scrap:
+        var accel: Vector2 = (piece.force_acc as Vector2) / float(piece.mass)
+        piece.vel       = (piece.vel as Vector2) + accel * delta
+        piece.pos       = (piece.pos as Vector2) + (piece.vel as Vector2) * delta
+        piece.angle     = float(piece.angle) + float(piece.angular_vel) * delta
+        piece.force_acc = Vector2.ZERO
 
 
 func _handle_collisions() -> void:
@@ -388,6 +710,18 @@ func _handle_collisions() -> void:
                 var hit_pos: Vector2 = missile.pos as Vector2
                 _spawn_explosion(hit_pos, missile.vel as Vector2, false)
                 missile.pos.x = SCENE_RADIUS * 2.0
+
+    # Missile hits on mines — mine detonates instantly
+    for mine in mines:
+        if not (mine.alive as bool):
+            continue
+        for missile in missiles:
+            if _circles_overlap(missile.pos as Vector2, MISSILE_RADIUS, mine.pos as Vector2, MINE_RADIUS):
+                _spawn_explosion(mine.pos as Vector2, mine.vel as Vector2, false)
+                _apply_blast_impulse(mine.pos as Vector2, EXPLOSION_BLAST_RADIUS_MISSILE)
+                mine.alive    = false
+                missile.pos.x = SCENE_RADIUS * 2.0
+                break
 
     # Ramming: damage based on relative speed, minimum 1
     if player_alive:
@@ -418,6 +752,18 @@ func _cull_offscreen_objects() -> void:
     for enemy in enemies:
         if enemy.alive and enemy.pos.length() > SCENE_RADIUS:
             enemy.alive = false
+
+    var live_scrap: Array = []
+    for piece in scrap:
+        if (piece.pos as Vector2).length() <= SCENE_RADIUS:
+            live_scrap.append(piece)
+    scrap = live_scrap
+
+    var live_mines_culled: Array = []
+    for mine in mines:
+        if (mine.pos as Vector2).length() <= SCENE_RADIUS:
+            live_mines_culled.append(mine)
+    mines = live_mines_culled
 
 
 func _check_leave_play_area() -> void:
@@ -465,13 +811,16 @@ func _step_end_timer(delta: float) -> void:
 
 func _show_end_ui() -> void:
     if end_state == "victory":
-        message_label.text = "Victory!"
+        var total_scrap: float = player_cargo_aboard
+        # Count any tethered over-capacity scrap
+        if tractor_active and not tractor_target.is_empty():
+            total_scrap += float(tractor_target.mass)
+        message_label.text = "Victory!\nScrap collected: %.0f t" % total_scrap
     elif end_state == "defeat":
         message_label.text = "Defeat!"
     else:
         message_label.text = ""
-
-    message_label.visible = true
+    message_label.visible  = true
     restart_button.visible = true
 
 
@@ -501,95 +850,185 @@ func _try_fire_enemy(enemy: Dictionary) -> void:
 func _try_fire_player() -> void:
     if not player_alive:
         return
-    if player_missiles_remaining <= 0:
-        return
-    if player_fire_cooldown > 0.0:
-        return
+    match active_weapon:
+        0: _fire_missile()
+        1: _fire_homing()
+        2: _fire_mine()
 
-    var dir := player_vel.normalized()
-    var spawn_pos := player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
+
+func _fire_missile() -> void:
+    if player_missiles_remaining <= 0 or player_fire_cooldown > 0.0:
+        return
+    var dir: Vector2       = player_vel.normalized()
+    if dir == Vector2.ZERO:
+        return
+    var spawn_pos: Vector2 = player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
     missiles.append({
-        "pos": spawn_pos,
-        "vel": dir * MISSILE_SPEED,
+        "pos":         spawn_pos,
+        "vel":         dir * MISSILE_SPEED,
         "from_player": true,
-        "power": MISSILE_POWER,
+        "power":       MISSILE_POWER,
+        "homing":      false,
     })
     player_missiles_remaining -= 1
-    player_fire_cooldown = PLAYER_FIRE_COOLDOWN
+    player_fire_cooldown       = PLAYER_FIRE_COOLDOWN
 
 
-func _update_fire_button_ui() -> void:
-    var fire_ready := player_fire_cooldown <= 0.0 and player_missiles_remaining > 0 and phase != GamePhase.ENDED
+func _fire_homing() -> void:
+    if player_homing_remaining <= 0 or player_homing_cooldown > 0.0:
+        return
+    var dir: Vector2       = player_vel.normalized()
+    if dir == Vector2.ZERO:
+        return
+    var spawn_pos: Vector2 = player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
+    missiles.append({
+        "pos":         spawn_pos,
+        "vel":         dir * MISSILE_SPEED,
+        "from_player": true,
+        "power":       MISSILE_POWER,
+        "homing":      true,
+    })
+    player_homing_remaining -= 1
+    player_homing_cooldown   = PLAYER_HOMING_COOLDOWN
 
-    fire_button.disabled = not fire_ready
 
-    if player_missiles_remaining <= 0:
-        fire_button.text = "NO AMMO"
-    elif player_fire_cooldown > 0.0:
-        fire_button.text = "RELOADING..."
-    else:
-        fire_button.text = "FIRE"
+func _fire_mine() -> void:
+    if player_mine_remaining <= 0 or player_mine_cooldown > 0.0:
+        return
+    mines.append({
+        "pos":           player_pos,
+        "vel":           player_vel,
+        "arm_timer":     MINE_ARM_TIME,
+        "trigger_timer": 0.0,
+        "triggered":     false,
+        "alive":         true,
+    })
+    player_mine_remaining -= 1
+    player_mine_cooldown   = PLAYER_MINE_COOLDOWN
 
-    # Cooldown fill sweeps left-to-right as cooldown expires (0 = just fired, full = ready)
-    var fill_ratio := 1.0 - clampf(player_fire_cooldown / PLAYER_FIRE_COOLDOWN, 0.0, 1.0)
-    cooldown_fill.size.x = fire_button.size.x * fill_ratio
 
-    # Fade border to 25% opacity when out of ammo
-    var border_alpha := 0.25 if player_missiles_remaining <= 0 else 1.0
-    var s := fire_button.get_theme_stylebox("normal") as StyleBoxFlat
-    if s:
-        s.border_color = Color(0.3, 0.91, 1.0, border_alpha)
+func _step_mines(delta: float) -> void:
+    var live_mines: Array = []
+    for mine in mines:
+        if not (mine.alive as bool):
+            continue
 
-    # Ammo dots
-    ammo_display.missiles_remaining = player_missiles_remaining
-    ammo_display.queue_redraw()
+        # Drift
+        mine.pos = (mine.pos as Vector2) + (mine.vel as Vector2) * delta
+
+        # Tick arm timer
+        if float(mine.arm_timer) > 0.0:
+            mine.arm_timer = maxf(0.0, float(mine.arm_timer) - delta)
+
+        # Tick trigger countdown
+        if (mine.triggered as bool):
+            mine.trigger_timer = maxf(0.0, float(mine.trigger_timer) - delta)
+            if float(mine.trigger_timer) <= 0.0:
+                _spawn_explosion(mine.pos as Vector2, mine.vel as Vector2, false)
+                _apply_blast_impulse(mine.pos as Vector2, EXPLOSION_BLAST_RADIUS_MISSILE)
+                mine.alive = false
+                continue
+
+        # Proximity check (only when armed and not yet triggered)
+        if float(mine.arm_timer) <= 0.0 and not (mine.triggered as bool):
+            var mpos: Vector2    = mine.pos as Vector2
+            var proximity_hit: bool  = false
+
+            # Check player
+            if player_alive and mpos.distance_to(player_pos) < MINE_TRIGGER_RADIUS:
+                proximity_hit = true
+
+            # Check enemies
+            if not proximity_hit:
+                for enemy in enemies:
+                    if (enemy.alive as bool) and mpos.distance_to(enemy.pos as Vector2) < MINE_TRIGGER_RADIUS:
+                        proximity_hit = true
+                        break
+
+            # Check scrap
+            if not proximity_hit:
+                for piece in scrap:
+                    if mpos.distance_to(piece.pos as Vector2) < MINE_TRIGGER_RADIUS:
+                        proximity_hit = true
+                        break
+
+            if proximity_hit:
+                mine.triggered     = true
+                mine.trigger_timer = MINE_TRIGGER_DELAY
+
+        live_mines.append(mine)
+    mines = live_mines
+
+
+func _update_hud() -> void:
+    if slot_buttons.is_empty():
+        return
+
+    var ammo_counts: Array[int]   = [player_missiles_remaining, player_homing_remaining, player_mine_remaining]
+    var cooldowns:   Array[float] = [player_fire_cooldown, player_homing_cooldown, player_mine_cooldown]
+    var cd_maxes:    Array[float] = [PLAYER_FIRE_COOLDOWN, PLAYER_HOMING_COOLDOWN, PLAYER_MINE_COOLDOWN]
+
+    for i: int in 3:
+        var btn:  Button    = slot_buttons[i]
+        var fill: ColorRect = slot_cooldowns[i]
+        var is_active: bool = active_weapon == i
+        btn.disabled = phase == GamePhase.ENDED or not player_alive
+
+        # Highlight active slot
+        var sty: StyleBoxFlat = btn.get_theme_stylebox("normal") as StyleBoxFlat
+        if sty:
+            sty.bg_color = Color(0.05, 0.05, 0.05, 0.5) if is_active else Color(0, 0, 0, 0)
+
+        # Cooldown fill
+        var cd_ratio: float = 1.0 - clampf(cooldowns[i] / cd_maxes[i], 0.0, 1.0)
+        fill.size.x = btn.size.x * cd_ratio
+
+        # Label
+        if ammo_counts[i] <= 0:
+            btn.text = "EMPTY"
+        elif cooldowns[i] > 0.0:
+            btn.text = "..."
+        else:
+            btn.text = "%s ×%d" % [["MSL", "HMG", "MNE"][i], ammo_counts[i]]
+
+    # Tractor button
+    if tractor_button:
+        var tst: StyleBoxFlat = tractor_button.get_theme_stylebox("normal") as StyleBoxFlat
+        if tst:
+            tst.bg_color = Color(0.961, 0.773, 0.259, 0.15 if tractor_active else 0.0)
+        tractor_button.text = "TRACTOR ●" if tractor_active else "TRACTOR"
+
+    # Mass + cargo
+    if mass_label:
+        mass_label.text = "MASS  %.0f t" % player_mass
+    if cargo_label:
+        cargo_label.text = "CARGO %.0f / %.0f t" % [player_cargo_aboard, PLAYER_CARGO_CAP]
+    if cargo_bar and cargo_bar_bg:
+        var fill_ratio: float = clampf(player_cargo_aboard / PLAYER_CARGO_CAP, 0.0, 1.0)
+        cargo_bar.size.x = cargo_bar_bg.size.x * fill_ratio
 
 
 func _update_planned_vector(mouse_world: Vector2) -> void:
     if not player_alive:
         return
-
-    var fwd := player_vel.normalized()
-    var right := fwd.rotated(PI * 0.5)
-
-    var raw := mouse_world - player_pos
-    if raw == Vector2.ZERO:
-        raw = fwd
-
-    # Decompose mouse offset into the ship's local (forward, right) frame.
-    var mx: float = raw.dot(fwd)
-    var my: float = raw.dot(right)
-
-    # Exact inversion of _arc_endpoint: the chord from start to arc endpoint points at θ/2
-    # from the forward direction, so the required turn angle is twice the chord angle.
-    var angle_raw := 2.0 * atan2(my, mx)
-    var angle_clamped: float = clamp(angle_raw, -turn_limit_this_turn, turn_limit_this_turn)
-
-    # After clamping, project the mouse onto the (possibly adjusted) chord direction
-    # to get the chord length, then convert to arc length (= speed * SIM_DURATION).
-    var chord_dir := fwd.rotated(angle_clamped * 0.5)
-    var chord_len := maxf(0.0, raw.dot(chord_dir))
-    var half_angle: float = angle_clamped * 0.5
-    var arc_len: float = chord_len if abs(half_angle) < 1e-4 else chord_len * half_angle / sin(half_angle)
-
-    planned_player_speed = clamp(arc_len / SIM_DURATION, turn_speed_min, turn_speed_max)
-    planned_turn_angle = angle_clamped
-    planned_player_vel = fwd.rotated(angle_clamped) * planned_player_speed
+    var offset: Vector2 = mouse_world - player_pos
+    var raw_len: float  = offset.length()
+    if raw_len < 1.0:
+        planned_thrust = Vector2.ZERO
+        return
+    var ratio: float   = minf(raw_len, THRUST_ARROW_MAX_LEN) / THRUST_ARROW_MAX_LEN
+    planned_thrust     = offset.normalized() * ratio * MAX_PLAYER_THRUST
 
 
-# Returns the actual endpoint of a circular-arc move: constant speed v, constant turn rate,
-# total heading change = turn_angle over SIM_DURATION. This is the single source of truth
-# for where any planned (speed, angle) combination lands — used by both the wedge and ghost.
-func _arc_endpoint(start: Vector2, facing: Vector2, speed: float, turn_angle: float) -> Vector2:
-    var fwd := facing.normalized()
-    var T := SIM_DURATION
-    if abs(turn_angle) < 1e-4:
-        return start + fwd * speed * T
-    var vT := speed * T
-    var right := fwd.rotated(PI * 0.5)
-    var x := vT * sin(turn_angle) / turn_angle
-    var y := vT * (1.0 - cos(turn_angle)) / turn_angle
-    return start + fwd * x + right * y
+func _spawn_scrap_piece(pos: Vector2, vel: Vector2) -> void:
+    scrap.append({
+        "pos":         pos,
+        "vel":         vel,
+        "mass":        randf_range(SCRAP_MASS_MIN, SCRAP_MASS_MAX),
+        "force_acc":   Vector2.ZERO,
+        "angle":       randf() * TAU,
+        "angular_vel": randf_range(-1.5, 1.5),
+    })
 
 
 func _spawn_explosion(pos: Vector2, vel: Vector2, is_ship: bool) -> void:
@@ -619,6 +1058,13 @@ func _spawn_explosion(pos: Vector2, vel: Vector2, is_ship: bool) -> void:
             "hp_dealt": false,
         })
 
+    if is_ship:
+        for _i in SCRAP_FROM_EXPLOSION:
+            var scatter_angle: float = randf() * TAU
+            var speed: float = randf_range(40.0, 120.0)
+            var scatter_vel: Vector2 = vel + Vector2(cos(scatter_angle), sin(scatter_angle)) * speed
+            _spawn_scrap_piece(pos + Vector2(cos(scatter_angle), sin(scatter_angle)) * 20.0, scatter_vel)
+
     var blast_r := EXPLOSION_BLAST_RADIUS_SHIP if is_ship else EXPLOSION_BLAST_RADIUS_MISSILE
     _apply_blast_impulse(pos, blast_r)
 
@@ -628,24 +1074,24 @@ func _apply_blast_impulse(blast_pos: Vector2, blast_radius: float) -> void:
         if not enemy.alive:
             continue
         var diff: Vector2 = (enemy.pos as Vector2) - blast_pos
-        var dist := diff.length()
+        var dist: float = diff.length()
         if dist < blast_radius and dist > 0.1:
-            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
-            enemy.vel = (enemy.vel as Vector2) + diff.normalized() * force
+            var delta_v: Vector2 = diff.normalized() * EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            enemy.force_acc = (enemy.force_acc as Vector2) + delta_v * float(enemy.mass)
 
     for missile in missiles:
         var diff: Vector2 = (missile.pos as Vector2) - blast_pos
-        var dist := diff.length()
+        var dist: float = diff.length()
         if dist < blast_radius and dist > 0.1:
-            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            var force: float = EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
             missile.vel = (missile.vel as Vector2) + diff.normalized() * force
 
     if player_alive:
-        var diff := player_pos - blast_pos
-        var dist := diff.length()
+        var diff: Vector2 = player_pos - blast_pos
+        var dist: float = diff.length()
         if dist < blast_radius and dist > 0.1:
-            var force := EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
-            player_vel += diff.normalized() * force
+            var delta_v: Vector2 = diff.normalized() * EXPLOSION_BLAST_FORCE * (1.0 - dist / blast_radius)
+            player_force_acc += delta_v * player_mass
 
 
 func _step_explosions(delta: float) -> void:
@@ -705,8 +1151,3 @@ func _is_inside_play_area(p: Vector2) -> bool:
     return _play_area_rect().has_point(p)
 
 
-func _compute_turn_limit_for_speed(speed: float) -> float:
-    if speed == 0.0:
-        return MAX_TURN_RADIANS
-    var speed_factor: float = clamp(PLAYER_SPEED_DEFAULT / speed, 0.5, 2.0)
-    return MAX_TURN_RADIANS * speed_factor
