@@ -696,6 +696,8 @@ func _fire_missile() -> void:
     if player_missiles_remaining <= 0 or player_fire_cooldown > 0.0:
         return
     var dir: Vector2       = player_vel.normalized()
+    if dir == Vector2.ZERO:
+        return
     var spawn_pos: Vector2 = player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
     missiles.append({
         "pos":         spawn_pos,
@@ -712,6 +714,8 @@ func _fire_homing() -> void:
     if player_homing_remaining <= 0 or player_homing_cooldown > 0.0:
         return
     var dir: Vector2       = player_vel.normalized()
+    if dir == Vector2.ZERO:
+        return
     var spawn_pos: Vector2 = player_pos + dir * (PLAYER_RADIUS + MISSILE_RADIUS + 2.0)
     missiles.append({
         "pos":         spawn_pos,
